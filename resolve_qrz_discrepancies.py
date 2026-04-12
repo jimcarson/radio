@@ -513,6 +513,9 @@ def resolve(
                     old_value=old_value, new_value=new_value,
                     status="updated",
                 ))
+                # Update the index so subsequent corrections for the same QSO
+                # accumulate rather than each overwriting the previous field.
+                qso_index[key][d.adif_field] = new_value
             else:
                 log.error("Unexpected result logid=%s: %s", logid, result)
                 resolutions.append(Resolution(
