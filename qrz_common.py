@@ -8,6 +8,7 @@ Provides:
   - QRZ API client (INSERT/REPLACE, DELETE, FETCH)
   - API key and config file loading (with callsign -> filename mapping)
   - Field value converters (CNTY, STATE, coordinates)
+  - Maidenhead grid square utilities (latlon_to_grid, grid_to_latlon)
   - Match key building and QSO indexing
   - Field comparison utilities for reconciliation
 
@@ -479,6 +480,128 @@ def validate_coord(value: str, field: str) -> str:
         raise ValueError(f"{field} minutes must be 0-59.999, got {minutes}")
 
     return f"{hemisphere}{degrees:03d} {minutes:06.3f}"
+
+
+# ---------------------------------------------------------------------------
+# Maidenhead grid square utilities
+# ---------------------------------------------------------------------------
+
+# Precision -> number of character pairs used
+# 4 chars = field + square         (~55 km resolution)
+# 6 chars = field + square + sub   (~460 m resolution)
+# 8 chars = field + square + sub + extended  (~4 m resolution)
+_GRID_PRECISIONS = {4, 6, 8}
+
+# Character sets for each pair level
+_UPPER  = "ABCDEFGHIJKLMNOPQRSTUVWX"   # field pair  (18 lon, 18 lat)
+_DIGIT  = "0123456789"                  # square pair (10 lon, 10 lat)
+_LOWER  = "abcdefghijklmnopqrstuvwx"   # subsquare   (24 lon, 24 lat)
+_DIGIT2 = "0123456789"                  # extended    (10 lon, 10 lat)
+
+# Sequence of (lon_div, lat_div, charset) for successive character pairs
+_PAIR_STEPS = [
+    (20.0,  10.0,  _UPPER),   # field     pair 1
+    (2.0,   1.0,   _DIGIT),   # square    pair 2
+    (5/60,  2.5/60, _LOWER),  # subsquare pair 3
+    (0.5/60, 0.25/60, _DIGIT2),  # extended pair 4
+]
+
+
+def latlon_to_grid(lat: float, lon: float, precision: int = 6) -> str:
+    """
+    Convert decimal latitude/longitude to a Maidenhead grid locator.
+
+    Args:
+        lat:       Latitude  in decimal degrees (-90 to +90)
+        lon:       Longitude in decimal degrees (-180 to +180)
+        precision: Number of characters to return — 4, 6, or 8 (default 6)
+
+    Returns:
+        Grid locator string, e.g. 'CN87an' (6-char) or 'CN87an45' (8-char).
+        First pair is always uppercase letters; second pair digits;
+        third pair lowercase letters; fourth pair digits.
+
+    Raises:
+        ValueError: if lat/lon are out of range or precision is not 4/6/8.
+    """
+    if precision not in _GRID_PRECISIONS:
+        raise ValueError(f"precision must be 4, 6, or 8 — got {precision}")
+    if not (-90.0 <= lat <= 90.0):
+        raise ValueError(f"lat {lat} out of range (-90 to +90)")
+    if not (-180.0 <= lon <= 180.0):
+        raise ValueError(f"lon {lon} out of range (-180 to +180)")
+
+    # Shift to positive origin: lon 0-360, lat 0-180
+    rem_lon = lon + 180.0
+    rem_lat = lat + 90.0
+
+    grid = []
+    n_pairs = precision // 2
+    for lon_div, lat_div, charset in _PAIR_STEPS[:n_pairs]:
+        lon_idx = int(rem_lon / lon_div)
+        lat_idx = int(rem_lat / lat_div)
+        # Clamp to charset length (handles exact upper boundary)
+        lon_idx = min(lon_idx, len(charset) - 1)
+        lat_idx = min(lat_idx, len(charset) - 1)
+        grid.append(charset[lon_idx])
+        grid.append(charset[lat_idx])
+        rem_lon -= lon_idx * lon_div
+        rem_lat -= lat_idx * lat_div
+
+    return "".join(grid)
+
+
+def grid_to_latlon(grid: str) -> tuple[float, float]:
+    """
+    Convert a Maidenhead grid locator to the decimal lat/lon of its centre.
+
+    Args:
+        grid: 4-, 6-, or 8-character Maidenhead locator.  The field pair is
+              case-insensitive; subsquare pair may be upper or lower case.
+
+    Returns:
+        (latitude, longitude) in decimal degrees at the centre of the square.
+
+    Raises:
+        ValueError: if the grid string length or characters are invalid.
+    """
+    g = grid.strip()
+    if len(g) not in _GRID_PRECISIONS:
+        raise ValueError(
+            f"Grid locator must be 4, 6, or 8 characters — got {len(g)}: {g!r}"
+        )
+
+    n_pairs = len(g) // 2
+    lon = -180.0
+    lat =  -90.0
+
+    for p, (lon_div, lat_div, charset) in enumerate(_PAIR_STEPS[:n_pairs]):
+        # Normalise character case to match the charset
+        if charset in (_DIGIT, _DIGIT2):
+            lon_ch = g[p * 2]
+            lat_ch = g[p * 2 + 1]
+        elif charset == _UPPER:
+            lon_ch = g[p * 2].upper()
+            lat_ch = g[p * 2 + 1].upper()
+        else:
+            lon_ch = g[p * 2].lower()
+            lat_ch = g[p * 2 + 1].lower()
+
+        if lon_ch not in charset or lat_ch not in charset:
+            raise ValueError(
+                f"Invalid character {g[p*2]!r}/{g[p*2+1]!r} at pair {p+1} "
+                f"(expected characters from {charset!r})"
+            )
+        lon += charset.index(lon_ch) * lon_div
+        lat += charset.index(lat_ch) * lat_div
+
+    # Offset to centre of the finest square
+    last_lon_div, last_lat_div, _ = _PAIR_STEPS[n_pairs - 1]
+    lon += last_lon_div / 2.0
+    lat += last_lat_div / 2.0
+
+    # Round to 6 decimal places (~0.1 m precision)
+    return round(lat, 6), round(lon, 6)
 
 
 # ---------------------------------------------------------------------------
