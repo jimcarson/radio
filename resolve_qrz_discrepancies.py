@@ -10,23 +10,55 @@ For each discrepancy:
   2. Applies the correction via ACTION=INSERT OPTION=REPLACE, which works on
      both unconfirmed and confirmed/award-locked records.
 
+Dry-run mode is the DEFAULT — no changes are written to QRZ unless you pass
+--update explicitly.
+
 Usage
 -----
-    # Correct other party's fields (Grid, State, County)
+    # Preview changes (dry-run is default)
     python resolve_qrz_discrepancies.py \
         --xlsx  qrz_errors.xlsx \
         --adif  qrz_export.adi \
         --call  WT8P \
-        [--key  YOUR-API-KEY] \
-        [--dry-run]
+        [--key  YOUR-API-KEY]
 
-    # Correct your own station's fields
+    # Apply changes
+    python resolve_qrz_discrepancies.py \
+        --xlsx  qrz_errors.xlsx \
+        --adif  qrz_export.adi \
+        --call  WT8P \
+        --update
+
+    # Correct your own station's fields from a CSV
     python resolve_qrz_discrepancies.py \
         --input-csv my_corrections.csv \
         --adif  qrz_export.adi \
         --call  WT8P \
         --my-station \
-        [--dry-run]
+        [--update]
+
+    # Derive coordinates from a grid square and update all three MY_ fields
+    python resolve_qrz_discrepancies.py \
+        --input-csv my_corrections.csv \
+        --adif  qrz_export.adi \
+        --call  WT8P \
+        --my-station \
+        --derive-coords \
+        [--grid-precision 6]
+
+CSV field keywords (--input-csv)
+---------------------------------
+    GRIDSQUARE, STATE, CNTY              — other party's fields
+    MY_GRIDSQUARE, MY_STATE, MY_CNTY    — your station's fields (or use
+                                           bare names with --my-station)
+    MY_LAT, MY_LON                       — your station coordinates
+    MY_LOC                               — lat+lon on one row: "lat,lon"
+                                           (quoted in CSV), e.g.:
+                                           MY_LOC,...,"47.5625,-122.058"
+                                           With --derive-coords also updates
+                                           MY_GRIDSQUARE.
+    MY_GRIDSQUARE (with --derive-coords) — also updates MY_LAT and MY_LON
+                                           from the grid centre.
 
     # API key can also be stored in WT8P.key (or TF_WT8P.key for TF/WT8P)
 
@@ -78,7 +110,9 @@ SHEET_TO_MY_ADIF_FIELD = {
 }
 
 # MY_ coordinate fields (CSV only, no Excel sheet equivalent)
-MY_COORD_FIELDS = {"MY_LAT", "MY_LON"}
+# MY_LOC is a virtual field: "lat,lon" in one quoted CSV cell — expanded
+# to MY_LAT + MY_LON (and optionally MY_GRIDSQUARE) during CSV loading.
+MY_COORD_FIELDS = {"MY_LAT", "MY_LON", "MY_LOC"}
 
 # All valid ADIF fields across both modes
 ALL_ADIF_FIELDS = (
@@ -134,7 +168,7 @@ def _parse_date_time(dt_val) -> tuple[str, str]:
 def _row_to_discrepancy(adif_field: str, sheet_name: str, row_date,
                          qso_with: str, your_val: str,
                          other_val: str, note: str) -> Optional[Discrepancy]:
-    bad_data  = note.strip().lower() == "bad data"
+    bad_data  = (note or "").strip().lower() == "bad data"
     other_val = other_val.strip()
     your_val  = your_val.strip()
     if not other_val or other_val.lower() in ("nan", "none", ""):
@@ -202,21 +236,33 @@ def load_discrepancies(xlsx_path: Path, my_station: bool = False) -> list[Discre
 # ---------------------------------------------------------------------------
 
 def load_discrepancies_csv(csv_path: Path,
-                            my_station: bool = False) -> list[Discrepancy]:
+                            my_station: bool = False,
+                            derive_coords: bool = False,
+                            grid_precision: int = 6) -> list[Discrepancy]:
     """
     Load discrepancies from a flat CSV file.
 
-    Required columns : field, qso_date, qso_with, other_party_entered
+    Required columns : field, qso_date, qso_with, new_value
     Optional columns : you_entered, de, note
+
+    Blank lines and lines whose first field starts with '#' are silently
+    skipped, allowing comments and section separators in the CSV.
 
     'field' values   : GRIDSQUARE, STATE, CNTY (promoted to MY_ if --my-station)
                        MY_GRIDSQUARE, MY_STATE, MY_CNTY, MY_LAT, MY_LON
+                       MY_LOC  — lat+lon together as a quoted "lat,lon" value;
+                                 expands to MY_LAT + MY_LON rows, and with
+                                 --derive-coords also MY_GRIDSQUARE.
+                       MY_GRIDSQUARE + --derive-coords also emits MY_LAT/MY_LON.
 
     Example:
-        field,qso_date,qso_with,other_party_entered,note
-        GRIDSQUARE,2024-07-06 20:28:00,VE5URQ,DN69,
-        STATE,2017-10-28 15:14:00,WA4JS,TEN,Bad Data
-        CNTY,2025-08-11 02:22:00,KL4RL,Anchorage Borough AK,
+        field,qso_date,qso_with,new_value
+        # Other party's fields
+        GRIDSQUARE,2024-07-06 20:28:00,VE5URQ,DN69
+        STATE,2017-10-28 15:14:00,WA4JS,TEN
+        # Own station fields
+        MY_LOC,2025-08-11 02:22:00,KL4RL,"47.5625,-122.058"
+        MY_GRIDSQUARE,2025-08-11 02:22:00,KL4RL,CN87xn
     """
     COL_ALIASES = {
         "field": "field", "adif_field": "field",
@@ -250,6 +296,11 @@ def load_discrepancies_csv(csv_path: Path,
             sys.exit(1)
 
         for i, raw_row in enumerate(reader, start=2):
+            # Skip blank rows and comment rows (first field starts with #)
+            first_val = (raw_row.get(reader.fieldnames[0]) or "").strip()
+            if not first_val or first_val.startswith("#"):
+                continue
+
             row = {canonical: raw_row[orig]
                    for orig, canonical in col_map.items()
                    if canonical and orig in raw_row}
@@ -262,16 +313,87 @@ def load_discrepancies_csv(csv_path: Path,
                 log.warning("Row %d: unknown field %r — skipping", i, adif_field)
                 continue
 
+            raw_value  = row.get("other_party_entered", "").strip()
             sheet_name = REVERSE_MAP.get(adif_field, adif_field)
-            d = _row_to_discrepancy(
+            common_kw  = dict(
                 adif_field=adif_field,
                 sheet_name=sheet_name,
                 row_date=row.get("qso_date", ""),
                 qso_with=row.get("qso_with", ""),
                 your_val=row.get("you_entered", ""),
-                other_val=row.get("other_party_entered", ""),
                 note=row.get("note", ""),
             )
+
+            # ------------------------------------------------------------------
+            # MY_LOC: "lat,lon" in one quoted cell → expand to MY_LAT + MY_LON
+            # and optionally MY_GRIDSQUARE (--derive-coords)
+            # ------------------------------------------------------------------
+            if adif_field == "MY_LOC":
+                parts = [p.strip() for p in raw_value.split(",", 1)]
+                if len(parts) != 2:
+                    log.warning(
+                        "Row %d: MY_LOC value %r must be 'lat,lon' "
+                        "(tip: quote the cell in CSV)", i, raw_value
+                    )
+                    continue
+                lat_str, lon_str = parts
+                for sub_field, sub_val in (("MY_LAT", lat_str),
+                                            ("MY_LON", lon_str)):
+                    d = _row_to_discrepancy(
+                        **{**common_kw,
+                           "adif_field": sub_field,
+                           "sheet_name": sub_field,
+                           "other_val":  sub_val}
+                    )
+                    if d:
+                        results.append(d)
+                if derive_coords:
+                    try:
+                        lat = float(lat_str)
+                        lon = float(lon_str)
+                        grid = qrz.latlon_to_grid(lat, lon, grid_precision)
+                    except ValueError as exc:
+                        log.warning("Row %d: cannot derive grid from MY_LOC: %s", i, exc)
+                    else:
+                        d = _row_to_discrepancy(
+                            **{**common_kw,
+                               "adif_field": "MY_GRIDSQUARE",
+                               "sheet_name": "MY_GRIDSQUARE",
+                               "other_val":  grid}
+                        )
+                        if d:
+                            results.append(d)
+                continue
+
+            # ------------------------------------------------------------------
+            # MY_GRIDSQUARE + --derive-coords: also emit MY_LAT and MY_LON
+            # ------------------------------------------------------------------
+            if adif_field == "MY_GRIDSQUARE" and derive_coords:
+                d = _row_to_discrepancy(**{**common_kw, "other_val": raw_value})
+                if d:
+                    results.append(d)
+                try:
+                    lat, lon = qrz.grid_to_latlon(raw_value)
+                except ValueError as exc:
+                    log.warning("Row %d: cannot derive coords from %r: %s",
+                                i, raw_value, exc)
+                else:
+                    for sub_field, sub_val in (("MY_LAT", str(lat)),
+                                                ("MY_LON", str(lon))):
+                        d = _row_to_discrepancy(
+                            **{**common_kw,
+                               "adif_field": sub_field,
+                               "sheet_name": sub_field,
+                               "other_val":  sub_val}
+                        )
+                        if d:
+                            results.append(d)
+                continue
+
+            # ------------------------------------------------------------------
+            # Standard single-field row
+            # ------------------------------------------------------------------
+            d = _row_to_discrepancy(**{**common_kw, "other_val": raw_value})
             if d:
                 results.append(d)
 
@@ -454,14 +576,15 @@ def write_csv(resolutions: list[Resolution], path: Path) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        description="Resolve QRZ logbook discrepancies via the QRZ API."
+        description="Resolve QRZ logbook discrepancies via the QRZ API. "
+                    "Dry-run mode is the default — pass --update to write changes."
     )
     input_group = p.add_mutually_exclusive_group(required=True)
     input_group.add_argument("--xlsx",
         help="QRZ discrepancy Excel file (e.g. qrz_errors.xlsx)")
     input_group.add_argument("--input-csv",
         help="Flat CSV input — columns: field, qso_date, qso_with, "
-             "other_party_entered. Optional: you_entered, note, de.")
+             "new_value. Optional: you_entered, note, de.")
     p.add_argument("--adif", required=True,
         help="Your QRZ ADIF export (must contain APP_QRZLOG_LOGID)")
     p.add_argument("--call", required=True,
@@ -472,8 +595,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--my-station", action="store_true",
         help="Correct your own station fields (MY_GRIDSQUARE, MY_STATE, "
              "MY_CNTY, MY_LAT, MY_LON) instead of the other party's fields")
-    p.add_argument("--dry-run", action="store_true",
-        help="Preview changes without writing to QRZ")
+    p.add_argument("--update", action="store_true",
+        help="Apply changes to QRZ (default is dry-run — preview only)")
+    p.add_argument("--derive-coords", action="store_true",
+        help="Derive related fields automatically: MY_LOC also updates "
+             "MY_GRIDSQUARE; MY_GRIDSQUARE also updates MY_LAT and MY_LON "
+             "(from grid centre). Only applies to --input-csv.")
+    p.add_argument("--grid-precision", type=int, default=6,
+        choices=[4, 6, 8],
+        help="Maidenhead grid precision when deriving a grid from coordinates "
+             "(4, 6, or 8 chars; default 6 ≈ 460 m). Only used with "
+             "--derive-coords.")
     p.add_argument("--output-csv", default="resolved_log.csv",
         help="Output CSV log (default: resolved_log.csv)")
     return p
@@ -483,6 +615,7 @@ def main() -> None:
     args    = build_parser().parse_args()
     adif    = Path(args.adif)
     out_csv = Path(args.output_csv)
+    dry_run = not args.update   # dry-run is the default
 
     if not adif.exists():
         log.error("File not found: %s", adif)
@@ -496,6 +629,8 @@ def main() -> None:
         log.info("=== QRZ Discrepancy Resolver ===")
         log.info("Excel    : %s", input_path)
         discrepancies = load_discrepancies(input_path, my_station=args.my_station)
+        if args.derive_coords:
+            log.warning("--derive-coords has no effect with --xlsx input")
     else:
         input_path = Path(args.input_csv)
         if not input_path.exists():
@@ -503,13 +638,20 @@ def main() -> None:
             sys.exit(1)
         log.info("=== QRZ Discrepancy Resolver ===")
         log.info("CSV      : %s", input_path)
-        discrepancies = load_discrepancies_csv(input_path, my_station=args.my_station)
+        discrepancies = load_discrepancies_csv(
+            input_path,
+            my_station=args.my_station,
+            derive_coords=args.derive_coords,
+            grid_precision=args.grid_precision,
+        )
 
     log.info("ADIF     : %s", adif)
     log.info("Callsign : %s", args.call.upper())
     log.info("Mode     : %s", "MY_ station fields" if args.my_station
              else "other party fields")
-    log.info("Dry run  : %s", args.dry_run)
+    log.info("Dry run  : %s", dry_run)
+    if args.derive_coords:
+        log.info("Derive coords: yes (grid precision=%d)", args.grid_precision)
 
     api_key = qrz.load_api_key(args.key, args.call)
 
@@ -522,10 +664,12 @@ def main() -> None:
     log.info("QSO index built with %d entries.", len(qso_index))
 
     resolutions = resolve(discrepancies, qso_index, api_key,
-                          args.call.upper(), args.dry_run)
+                          args.call.upper(), dry_run)
 
     write_csv(resolutions, out_csv)
     log.info("=== Done. ===")
+    if dry_run:
+        log.info("(Dry-run mode — re-run with --update to apply changes)")
 
 
 if __name__ == "__main__":
