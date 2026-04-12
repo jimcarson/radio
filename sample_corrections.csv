@@ -1,0 +1,52 @@
+field,qso_date,qso_with,new_value,note
+
+# ── Other party's fields ──────────────────────────────────────────────────────
+# Use these without --my-station.  Bare names (GRIDSQUARE, STATE, CNTY) refer
+# to the other party's logged values.
+
+# Correct the other party's grid square.
+GRIDSQUARE,2024-07-06 20:28:00,W1AW,FN31
+
+# Correct the other party's state.  Non-standard abbreviations (e.g. TEN → TN)
+# are normalised automatically.
+STATE,2017-10-28 15:14:00,W1AW,CT
+
+# Correct the other party's county.  "County" and Alaska "Borough" are stripped
+# automatically.  QRZ display format "Hartford County, CT" is also accepted.
+CNTY,2025-08-11 02:22:00,W1AW,CT,Hartford
+
+# Mark a row as bad data to skip it without deleting it from the file.
+GRIDSQUARE,2024-03-01 14:00:00,W1AW,LNA,Bad Data
+
+# ── Your own station's fields (requires --my-station) ─────────────────────────
+# Bare names (GRIDSQUARE, STATE, CNTY) are promoted to their MY_ equivalents
+# when --my-station is active.  You can also use the MY_ names directly.
+
+# Your grid square.
+MY_GRIDSQUARE,2025-08-11 02:22:00,W1AW,CN87xn
+
+# Your state and county.
+MY_STATE,2025-08-11 02:22:00,W1AW,WA
+MY_CNTY,2025-08-11 02:22:00,W1AW,WA,King
+
+# ── Coordinates: separate rows ────────────────────────────────────────────────
+# MY_LAT and MY_LON accept decimal degrees or ADIF native format.
+# Positive lat = North, negative = South.
+# Positive lon = East,  negative = West.
+MY_LAT,2025-08-11 02:22:00,W1AW,47.5625
+MY_LON,2025-08-11 02:22:00,W1AW,-122.058
+
+# ── Coordinates: combined row (MY_LOC) ────────────────────────────────────────
+# MY_LOC sets both MY_LAT and MY_LON from a single row.
+# The "lat,lon" value must be quoted so the comma is not treated as a column
+# separator.  This expands into two separate MY_LAT and MY_LON updates.
+# With --derive-coords it also derives and updates MY_GRIDSQUARE.
+MY_LOC,2025-08-11 02:22:00,W1AW,"47.5625,-122.058"
+
+# ── Grid square with coordinate derivation (--derive-coords) ──────────────────
+# When --derive-coords is active, a MY_GRIDSQUARE row also emits MY_LAT and
+# MY_LON updates derived from the centre of the specified grid square.
+# Useful when your logging app gives you a precise grid and you want all three
+# fields updated in one go.  Use --grid-precision (4, 6, or 8; default 6) to
+# control the resolution when deriving a grid from coordinates.
+MY_GRIDSQUARE,2025-08-11 02:22:00,W1AW,CN87xn
