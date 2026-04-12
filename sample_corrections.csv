@@ -11,9 +11,10 @@ GRIDSQUARE,2024-07-06 20:28:00,W1AW,FN31
 # are normalised automatically.
 STATE,2017-10-28 15:14:00,W1AW,CT
 
-# Correct the other party's county.  "County" and Alaska "Borough" are stripped
-# automatically.  QRZ display format "Hartford County, CT" is also accepted.
-CNTY,2025-08-11 02:22:00,W1AW,CT,Hartford
+# Correct the other party's county.  Supply the QRZ display format, quoted
+# because it contains a comma.  "County", "Borough" (AK), and "Parish" (LA)
+# are stripped automatically and the value is converted to ADIF format.
+CNTY,2025-08-11 02:22:00,W1AW,"Hartford County, CT"
 
 # Mark a row as bad data to skip it without deleting it from the file.
 GRIDSQUARE,2024-03-01 14:00:00,W1AW,LNA,Bad Data
@@ -27,7 +28,7 @@ MY_GRIDSQUARE,2025-08-11 02:22:00,W1AW,CN87xn
 
 # Your state and county.
 MY_STATE,2025-08-11 02:22:00,W1AW,WA
-MY_CNTY,2025-08-11 02:22:00,W1AW,WA,King
+MY_CNTY,2025-08-11 02:22:00,W1AW,"King County, WA"
 
 # ── Coordinates: separate rows ────────────────────────────────────────────────
 # MY_LAT and MY_LON accept decimal degrees or ADIF native format.

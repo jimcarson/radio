@@ -168,9 +168,10 @@ GRIDSQUARE,2024-07-06 20:28:00,W1AW,FN31
 # are normalised automatically.
 STATE,2017-10-28 15:14:00,W1AW,CT
 
-# Correct the other party's county. "County" and Alaska "Borough" are stripped
-# automatically. QRZ display format "Hartford County, CT" is also accepted.
-CNTY,2025-08-11 02:22:00,W1AW,CT,Hartford
+# Correct the other party's county. Supply the QRZ display format, quoted
+# because it contains a comma. "County", "Borough" (AK), and "Parish" (LA)
+# are stripped automatically and the value converted to ADIF format.
+CNTY,2025-08-11 02:22:00,W1AW,"Hartford County, CT"
 
 # Mark a row as bad data to skip it without removing it from the file.
 GRIDSQUARE,2024-03-01 14:00:00,W1AW,LNA,Bad Data
@@ -184,7 +185,7 @@ MY_GRIDSQUARE,2025-08-11 02:22:00,W1AW,CN87xn
 
 # Your state and county
 MY_STATE,2025-08-11 02:22:00,W1AW,WA
-MY_CNTY,2025-08-11 02:22:00,W1AW,WA,King
+MY_CNTY,2025-08-11 02:22:00,W1AW,"King County, WA"
 
 # ── Coordinates: separate rows ────────────────────────────────────────────────
 # MY_LAT and MY_LON accept decimal degrees or ADIF native format.
@@ -214,10 +215,10 @@ MY_GRIDSQUARE,2025-08-11 02:22:00,W1AW,CN87xn
 |---|---|---|
 | `GRIDSQUARE` | `GRIDSQUARE` | Other party's grid |
 | `STATE` | `STATE` | Other party's state; non-standard abbrevs normalised |
-| `CNTY` | `CNTY` | Other party's county; "County"/"Borough" stripped |
+| `CNTY` | `CNTY` | Other party's county; quoted QRZ display format: `"Hartford County, CT"` |
 | `MY_GRIDSQUARE` | `MY_GRIDSQUARE` | Your grid; also `MY_LAT` + `MY_LON` with `--derive-coords` |
 | `MY_STATE` | `MY_STATE` | Your state |
-| `MY_CNTY` | `MY_CNTY` | Your county |
+| `MY_CNTY` | `MY_CNTY` | Your county; quoted QRZ display format: `"King County, WA"` |
 | `MY_LAT` | `MY_LAT` | Your latitude (decimal or ADIF native format) |
 | `MY_LON` | `MY_LON` | Your longitude (decimal or ADIF native format) |
 | `MY_LOC` | `MY_LAT` + `MY_LON` | Combined lat/lon — value must be quoted `"lat,lon"`; also updates `MY_GRIDSQUARE` with `--derive-coords` |
@@ -290,7 +291,7 @@ python resolve_qrz_discrepancies.py \
 
 ### Field Format Conversions
 
-**County (`CNTY`):** QRZ displays `County Name, ST`; ADIF format is `ST,County Name`. The word `County` is stripped. For Alaska, `Borough` is also stripped (e.g. `Anchorage Borough, AK` → `AK,Anchorage`).
+**County (`CNTY` / `MY_CNTY`):** Supply the value in QRZ display format, quoted because it contains a comma: `"Hartford County, CT"`. The script converts it to ADIF format (`ST,County Name`) before writing to QRZ. The word `County` is stripped automatically; for Alaska `Borough` is also stripped (e.g. `"Anchorage Borough, AK"` → `AK,Anchorage`), and for Louisiana `Parish` is stripped.
 
 **State (`STATE`):** Non-standard abbreviations (e.g. `IND` → `IN`) are automatically normalised to 2-letter ADIF values.
 

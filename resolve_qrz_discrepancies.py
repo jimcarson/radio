@@ -255,14 +255,22 @@ def load_discrepancies_csv(csv_path: Path,
                                  --derive-coords also MY_GRIDSQUARE.
                        MY_GRIDSQUARE + --derive-coords also emits MY_LAT/MY_LON.
 
+    CNTY / MY_CNTY   : Supply the QRZ display format, quoted because it contains
+                       a comma: "Hartford County, CT".  The word 'County' (and
+                       'Borough' for Alaska, 'Parish' for Louisiana) is stripped
+                       and the value is converted to ADIF format (CT,Hartford)
+                       before being written to QRZ.
+
     Example:
         field,qso_date,qso_with,new_value
         # Other party's fields
         GRIDSQUARE,2024-07-06 20:28:00,VE5URQ,DN69
         STATE,2017-10-28 15:14:00,WA4JS,TEN
+        CNTY,2025-08-11 02:22:00,VE5URQ,"Polk County, MN"
         # Own station fields
         MY_LOC,2025-08-11 02:22:00,KL4RL,"47.5625,-122.058"
         MY_GRIDSQUARE,2025-08-11 02:22:00,KL4RL,CN87xn
+        MY_CNTY,2025-08-11 02:22:00,KL4RL,"King County, WA"
     """
     COL_ALIASES = {
         "field": "field", "adif_field": "field",
