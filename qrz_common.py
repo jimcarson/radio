@@ -11,9 +11,13 @@ Provides:
   - Maidenhead grid square utilities (latlon_to_grid, grid_to_latlon)
   - Match key building and QSO indexing
   - Field comparison utilities for reconciliation
+  - Date/time normalisation (parse_qso_datetime) — handles both ADIF
+    compact format (YYYYMMDD / HHMM) and human-readable (YYYY-MM-DD /
+    HH:MM or YYYY-MM-DD HH:MM:SS), used by resolve and adif_extract.
 
 Imported by:
   - resolve_qrz_discrepancies.py
+  - adif_extract.py
   - reconcile_adif.py
 """
 
@@ -28,6 +32,87 @@ from typing import Optional
 import requests
 
 log = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Date / time normalisation
+# ---------------------------------------------------------------------------
+
+def parse_qso_datetime(date_val: str, time_val: str = "") -> tuple[str, str]:
+    """
+    Parse QSO date and time values into a canonical pair:
+        date  -> "YYYYMMDD"   (ADIF storage format)
+        time  -> "HHMM"       (ADIF storage format)
+
+    Accepted date formats:
+        "YYYYMMDD"            ADIF compact (QRZ ADIF export)
+        "YYYY-MM-DD"          ISO date only
+        "YYYY-MM-DD HH:MM"    ISO datetime
+        "YYYY-MM-DD HH:MM:SS" ISO datetime with seconds
+
+    Accepted time formats (when supplied separately):
+        "HHMM"                ADIF compact (QRZ ADIF export)
+        "HH:MM"               human-readable
+        "HH:MM:SS"            with seconds (seconds are dropped)
+        ""                    empty / not present
+
+    When date_val already contains a time component (space-separated),
+    time_val is ignored.
+
+    Returns ("YYYYMMDD", "HHMM") — both strings.  On failure, returns
+    the raw inputs unchanged and logs a warning.
+    """
+    date_s = str(date_val).strip()
+    time_s = str(time_val).strip()
+
+    # If date_val contains a space, split into date + time parts
+    if " " in date_s:
+        date_s, time_s = date_s.split(" ", 1)
+
+    # --- Normalise date ---
+    # Already YYYYMMDD (8 digits, no dashes)?
+    if re.fullmatch(r"\d{8}", date_s):
+        norm_date = date_s
+    # ISO YYYY-MM-DD?
+    elif re.fullmatch(r"\d{4}-\d{2}-\d{2}", date_s):
+        norm_date = date_s.replace("-", "")
+    else:
+        log.warning("parse_qso_datetime: unrecognised date %r", date_s)
+        return date_s, time_s
+
+    # --- Normalise time ---
+    if not time_s:
+        norm_time = ""
+    elif re.fullmatch(r"\d{4}", time_s):          # HHMM
+        norm_time = time_s
+    elif re.fullmatch(r"\d{2}:\d{2}(:\d{2})?", time_s):  # HH:MM or HH:MM:SS
+        norm_time = time_s[:5].replace(":", "")
+    else:
+        log.warning("parse_qso_datetime: unrecognised time %r", time_s)
+        norm_time = time_s
+
+    return norm_date, norm_time
+
+
+def format_qso_datetime(date_adif: str, time_adif: str) -> tuple[str, str]:
+    """
+    Convert ADIF-format date/time to human-readable form for CSV output.
+
+        "20260328", "1635"  ->  "2026-03-28", "16:35"
+
+    Accepts either ADIF compact or already-formatted values gracefully.
+    """
+    d = str(date_adif).strip()
+    t = str(time_adif).strip()
+
+    if re.fullmatch(r"\d{8}", d):
+        d = f"{d[:4]}-{d[4:6]}-{d[6:]}"
+
+    if re.fullmatch(r"\d{4}", t):
+        t = f"{t[:2]}:{t[2:]}"
+
+    return d, t
+
 
 # ---------------------------------------------------------------------------
 # Constants

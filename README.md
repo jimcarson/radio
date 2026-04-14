@@ -22,10 +22,11 @@ USE AT YOUR OWN RISK.  These are presented AS IS and without any warranty.
 |---|---|
 | `qrz_common.py` | Shared library — ADIF parsing, QRZ API client, field converters, Maidenhead grid utilities, config loading |
 | `resolve_qrz_discrepancies.py` | Corrects Grid, State, and County discrepancies reported by QRZ's Awards pages as well as allowing bulk correction of your own records. |
+| `adif_extract.py` | Extracts QSOs from a QRZ ADIF export to an inspection CSV; supports date-range and single-date filtering. Produces a ready-to-edit file that feeds directly into `resolve_qrz_discrepancies.py`. |
 | `reconcile_adif.py` | Compares LoTW and QRZ ADIF exports and optionally pushes corrections to QRZ |
 | `sample_corrections.csv` | Annotated sample CSV covering all supported `field` keywords — copy and edit for your own use |
 
-All three files must be in the same directory. `qrz_common.py` is not run directly.
+All files must be in the same directory. `qrz_common.py` is not run directly.
 
 ---
 
@@ -207,6 +208,11 @@ MY_LOC,2025-08-11 02:22:00,W1AW,"47.5625,-122.058"
 # Useful when your logging app reports a precise grid and you want all
 # three fields updated consistently.
 MY_GRIDSQUARE,2025-08-11 02:22:00,W1AW,CN87xn
+
+# ── Comment field ──────────────────────────────────────────────────────────────
+# COMMENT sets the QRZ logbook comment. Valid with or without --my-station.
+# Useful for adding or correcting POTA/SOTA park references logged in the field.
+COMMENT,2026-03-28 16:35:00,AB0LV,US-3263 Scenic Beach State Park WA
 ```
 
 **Summary of `field` keywords and what they update:**
@@ -222,6 +228,7 @@ MY_GRIDSQUARE,2025-08-11 02:22:00,W1AW,CN87xn
 | `MY_LAT` | `MY_LAT` | Your latitude (decimal or ADIF native format) |
 | `MY_LON` | `MY_LON` | Your longitude (decimal or ADIF native format) |
 | `MY_LOC` | `MY_LAT` + `MY_LON` | Combined lat/lon — value must be quoted `"lat,lon"`; also updates `MY_GRIDSQUARE` with `--derive-coords` |
+| `COMMENT` | `COMMENT` | QRZ logbook comment (free text); valid with or without `--my-station` |
 
 ### Correcting Your Own Station's Fields (`--my-station`)
 
@@ -300,6 +307,87 @@ python resolve_qrz_discrepancies.py \
 The script uses `ACTION=INSERT` with `OPTION=REPLACE` on the QRZ API. Including `APP_QRZLOG_LOGID` in the ADIF payload causes QRZ to replace the existing record in place, returning `RESULT=REPLACE`. This works on both unconfirmed and confirmed/award-locked records — unlike `ACTION=DELETE`, which fails silently on locked records.
 
 Records are matched using: **Callsign + Date + Time (HHMM)**.
+
+---
+
+## `adif_extract.py`
+
+Extracts QSOs from a QRZ ADIF export to an inspection CSV, with optional date-range or single-date filtering. Designed for the common portable-operations workflow: export a range of contacts from QRZ, spot-check `MY_` fields and `COMMENT` in Excel, fill in corrections, then feed the result back to `resolve_qrz_discrepancies.py`.
+
+Does not call the QRZ API and requires no API key.
+
+### Quick Start
+
+**1. Extract a single activation date**
+
+```bash
+python adif_extract.py --adif wt8p.adi --date 2026-03-28
+```
+
+**2. Extract a date range**
+
+```bash
+python adif_extract.py --adif wt8p.adi --after 2026-03-20 --before 2026-03-31 --output-csv march_pota.csv
+```
+
+**3. Open the CSV in Excel, review and fill in corrections**
+
+The `field` and `new_value` columns are blank — add the field to correct and its new value on each row. Duplicate a row if the same QSO needs multiple corrections. Delete rows you don't need to change.
+
+**4. Feed the edited CSV to resolve_qrz_discrepancies.py**
+
+```bash
+python resolve_qrz_discrepancies.py \
+    --input-csv march_pota.csv \
+    --adif wt8p.adi \
+    --call WT8P \
+    --my-station \
+    --derive-coords
+```
+
+### All Options
+
+```
+--adif <file>           QRZ ADIF export file (required)
+--date <DATE>           Extract a single date — shorthand for --after DATE --before DATE
+                        Mutually exclusive with --after.
+--after <DATE>          Include QSOs on or after this date (inclusive)
+--before <DATE>         Include QSOs on or before this date (inclusive)
+--output-csv <file>     Output CSV filename (default: adif_extract.csv)
+```
+
+Date formats accepted for all date arguments: `YYYY-MM-DD` or `YYYYMMDD`.
+
+### Output CSV Columns
+
+| Column | Description |
+|---|---|
+| `field` | **Blank — fill in** the ADIF field name to correct (e.g. `MY_GRIDSQUARE`, `COMMENT`) |
+| `qso_date` | QSO date in `YYYY-MM-DD` format |
+| `time_on` | QSO time in `HH:MM` format |
+| `call` | Contacted station callsign |
+| `MY_GRIDSQUARE` | Your grid square as logged |
+| `MY_LAT` | Your latitude (ADIF format) |
+| `MY_LON` | Your longitude (ADIF format) |
+| `MY_STATE` | Your state |
+| `MY_CNTY` | Your county (ADIF format, e.g. `WA,Kitsap`) |
+| `MY_CITY` | Your city |
+| `MY_COUNTRY` | Your country |
+| `MY_CQ_ZONE` | Your CQ zone |
+| `MY_ITU_ZONE` | Your ITU zone |
+| `MY_DXCC` | Your DXCC entity code |
+| `MY_NAME` | Your name as logged |
+| `COMMENT` | QRZ logbook comment |
+| `new_value` | **Blank — fill in** the corrected value |
+
+### Typical POTA / Portable Workflow
+
+When logging in the field, apps like N3FJP or WSJT-X may capture your grid automatically but sometimes use your home location for lat/lon, or a QRZ upload can overwrite the correct grid with your default location. The typical correction flow is:
+
+1. After an activation, export your full QRZ ADIF (or use a previous export if it's current).
+2. Run `adif_extract.py --date <activation-date>` to pull just that day's QSOs.
+3. In Excel: verify `MY_GRIDSQUARE`, `MY_LAT`, `MY_LON`, and `COMMENT`. For each field that needs correcting, set `field` = the ADIF field name and `new_value` = the correct value.
+4. Save as CSV and run `resolve_qrz_discrepancies.py --input-csv ... --my-station --derive-coords`. With `--derive-coords`, a single `MY_GRIDSQUARE` correction will also update `MY_LAT` and `MY_LON` from the grid centre automatically.
 
 ---
 
@@ -419,7 +507,7 @@ Contains only records with at least one `corrected` field change. Can be importe
 
 ## `qrz_common.py` — Shared Library
 
-This file is used by both scripts and is not run directly. It provides:
+This file is used by all scripts and is not run directly. It provides:
 
 - **ADIF parser** — handles HTML-escaped brackets from QRZ API responses
 - **QRZ API client** — `ACTION=INSERT OPTION=REPLACE` for in-place updates
@@ -427,6 +515,7 @@ This file is used by both scripts and is not run directly. It provides:
 - **Config file loader** — reads `<CALLSIGN>.cfg` for per-field rules
 - **Field converters** — `CNTY` display-to-ADIF format, `STATE` normalisation, coordinate validation
 - **Maidenhead grid utilities** — `latlon_to_grid()` converts decimal coordinates to a 4-, 6-, or 8-character grid locator; `grid_to_latlon()` converts a grid locator back to the decimal lat/lon of its centre point
+- **Date/time normalisation** — `parse_qso_datetime()` accepts both ADIF compact format (`YYYYMMDD` / `HHMM`, as found in QRZ exports) and human-readable format (`YYYY-MM-DD` / `HH:MM`), used by both `resolve_qrz_discrepancies.py` and `adif_extract.py`; `format_qso_datetime()` converts ADIF compact to human-readable for CSV output
 - **Field comparison utilities** — integer normalisation, gridsquare prefix matching, country name mapping
 
 ---

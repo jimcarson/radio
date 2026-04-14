@@ -59,6 +59,9 @@ CSV field keywords (--input-csv)
                                            MY_GRIDSQUARE.
     MY_GRIDSQUARE (with --derive-coords) — also updates MY_LAT and MY_LON
                                            from the grid centre.
+    COMMENT                              — QRZ logbook comment (free text);
+                                           valid in both --my-station and
+                                           other-party modes.
 
     # API key can also be stored in WT8P.key (or TF_WT8P.key for TF/WT8P)
 
@@ -77,7 +80,6 @@ import logging
 import sys
 import time
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -114,11 +116,16 @@ SHEET_TO_MY_ADIF_FIELD = {
 # to MY_LAT + MY_LON (and optionally MY_GRIDSQUARE) during CSV loading.
 MY_COORD_FIELDS = {"MY_LAT", "MY_LON", "MY_LOC"}
 
+# COMMENT is a standalone field, valid in both --my-station and other-party
+# modes.  It is not prefixed MY_ and has no Excel sheet equivalent.
+COMMENT_FIELDS = {"COMMENT"}
+
 # All valid ADIF fields across both modes
 ALL_ADIF_FIELDS = (
     set(SHEET_TO_ADIF_FIELD.values())
     | set(SHEET_TO_MY_ADIF_FIELD.values())
     | MY_COORD_FIELDS
+    | COMMENT_FIELDS
 )
 
 
@@ -153,16 +160,16 @@ class Resolution:
 # ---------------------------------------------------------------------------
 
 def _parse_date_time(dt_val) -> tuple[str, str]:
+    """
+    Parse a date/time value from the Excel discrepancy report.
+    Delegates to qrz.parse_qso_datetime which handles both ADIF compact
+    (YYYYMMDD / HHMM) and human-readable (YYYY-MM-DD HH:MM[:SS]) formats.
+    pandas Timestamps are converted to ISO string first.
+    """
     if isinstance(dt_val, pd.Timestamp):
-        return dt_val.strftime("%Y%m%d"), dt_val.strftime("%H%M")
-    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y%m%d %H%M"):
-        try:
-            dt = datetime.strptime(str(dt_val).strip(), fmt)
-            return dt.strftime("%Y%m%d"), dt.strftime("%H%M")
-        except ValueError:
-            continue
-    log.warning("Could not parse date/time: %r", dt_val)
-    return str(dt_val), ""
+        return qrz.parse_qso_datetime(dt_val.strftime("%Y-%m-%d"),
+                                      dt_val.strftime("%H:%M"))
+    return qrz.parse_qso_datetime(str(dt_val).strip())
 
 
 def _row_to_discrepancy(adif_field: str, sheet_name: str, row_date,
@@ -254,6 +261,8 @@ def load_discrepancies_csv(csv_path: Path,
                                  expands to MY_LAT + MY_LON rows, and with
                                  --derive-coords also MY_GRIDSQUARE.
                        MY_GRIDSQUARE + --derive-coords also emits MY_LAT/MY_LON.
+                       COMMENT — QRZ logbook comment field; accepted in both
+                                 --my-station and other-party modes.
 
     CNTY / MY_CNTY   : Supply the QRZ display format, quoted because it contains
                        a comma: "Hartford County, CT".  The word 'County' (and
