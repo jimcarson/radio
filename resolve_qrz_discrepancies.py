@@ -79,6 +79,7 @@ import csv
 import logging
 import sys
 import time
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -425,6 +426,24 @@ def load_discrepancies_csv(csv_path: Path,
 # Core resolution logic
 # ---------------------------------------------------------------------------
 
+def _convert_field(adif_field: str, raw_value: str,
+                   logid: str) -> tuple[str, str]:
+    """
+    Convert a raw CSV value to its ADIF-format equivalent.
+    Returns (new_value, error_msg).  error_msg is empty on success.
+    """
+    if adif_field in ("CNTY", "MY_CNTY"):
+        return qrz.convert_cnty(raw_value), ""
+    if adif_field in ("STATE", "MY_STATE"):
+        return qrz.convert_state(raw_value), ""
+    if adif_field in ("MY_LAT", "MY_LON"):
+        try:
+            return qrz.validate_coord(raw_value, adif_field), ""
+        except ValueError as exc:
+            return raw_value, str(exc)
+    return raw_value, ""
+
+
 def resolve(
     discrepancies: list[Discrepancy],
     qso_index:     dict[tuple, dict],
@@ -432,10 +451,34 @@ def resolve(
     callsign:      str,
     dry_run:       bool,
 ) -> list[Resolution]:
+    """
+    Resolve discrepancies against the QSO index, consolidating all field
+    updates for the same QRZ logid into a single API call.
 
+    Phase 1 — prepare:
+        Match each Discrepancy to a QSO record, convert field values, and
+        classify into no_match / no_logid / no_change / ready buckets.
+
+    Phase 2 — group and call:
+        For each logid that has at least one ready field, build a single
+        updated QSO dict and fire one INSERT OPTION=REPLACE.  Fan the
+        result back out to one Resolution per field.
+
+    Output CSV remains one row per field (logid repeats for multi-field
+    QSOs) so the log is fully auditable.
+    """
     actionable = [d for d in discrepancies if not d.bad_data]
     log.info("Processing %d actionable discrepancies…", len(actionable))
-    resolutions: list[Resolution] = []
+
+    # ------------------------------------------------------------------
+    # Phase 1 — match, convert, classify
+    # ------------------------------------------------------------------
+    # terminal: resolutions already fully determined (no API call needed)
+    terminal: list[Resolution] = []
+
+    # pending: (discrepancy, logid, match_key, old_value, new_value)
+    # grouped later by logid
+    pending: list[tuple] = []
 
     for d in actionable:
         key = (d.qso_with, d.qso_date, d.time_on)
@@ -443,7 +486,7 @@ def resolve(
 
         if qso is None:
             log.warning("No match : %-12s  %s %s", d.qso_with, d.qso_date, d.time_on)
-            resolutions.append(Resolution(
+            terminal.append(Resolution(
                 discrepancy=d, logid=None,
                 old_value=d.your_value, new_value=d.other_value,
                 status="no_match",
@@ -458,92 +501,117 @@ def resolve(
                 pass
 
         old_value = qso.get(d.adif_field, "")
+        new_value, err = _convert_field(d.adif_field, d.other_value, logid)
 
-        # Convert display format to ADIF format
-        if d.adif_field in ("CNTY", "MY_CNTY"):
-            new_value = qrz.convert_cnty(d.other_value)
-        elif d.adif_field in ("STATE", "MY_STATE"):
-            new_value = qrz.convert_state(d.other_value)
-        elif d.adif_field in ("MY_LAT", "MY_LON"):
-            try:
-                new_value = qrz.validate_coord(d.other_value, d.adif_field)
-            except ValueError as exc:
-                log.error("Invalid coordinate logid=%s %s: %s", logid, d.adif_field, exc)
-                resolutions.append(Resolution(
-                    discrepancy=d, logid=logid,
-                    old_value=old_value, new_value=d.other_value,
-                    status="error", error_msg=str(exc),
-                ))
-                continue
-        else:
-            new_value = d.other_value
+        if err:
+            log.error("Invalid value logid=%s %s: %s", logid, d.adif_field, err)
+            terminal.append(Resolution(
+                discrepancy=d, logid=logid,
+                old_value=old_value, new_value=new_value,
+                status="error", error_msg=err,
+            ))
+            continue
 
         if not logid:
             log.warning("No logid : %-12s  %s %s", d.qso_with, d.qso_date, d.time_on)
-            resolutions.append(Resolution(
+            terminal.append(Resolution(
                 discrepancy=d, logid=None,
                 old_value=old_value, new_value=new_value,
-                status="error", error_msg="APP_QRZLOG_LOGID missing from ADIF export",
+                status="error",
+                error_msg="APP_QRZLOG_LOGID missing from ADIF export",
             ))
             continue
 
         if old_value == new_value:
             log.info("No-op    logid=%-8s  %-12s  %s: already %r",
                      logid, d.qso_with, d.adif_field, new_value)
-            resolutions.append(Resolution(
+            terminal.append(Resolution(
                 discrepancy=d, logid=logid,
                 old_value=old_value, new_value=new_value,
                 status="no_change",
             ))
             continue
 
+        pending.append((d, logid, key, old_value, new_value))
+
+    # ------------------------------------------------------------------
+    # Phase 2 — group by logid, one API call per QSO
+    # ------------------------------------------------------------------
+    # Use OrderedDict to preserve encounter order of logids
+    groups: OrderedDict[str, list[tuple]] = OrderedDict()
+    for item in pending:
+        logid = item[1]
+        groups.setdefault(logid, []).append(item)
+
+    api_resolutions: list[Resolution] = []
+
+    for logid, items in groups.items():
+        # items: list of (d, logid, key, old_value, new_value)
+        # All items share the same logid so same QSO — use the first key
+        key = items[0][2]
+        qso = qso_index[key]
+
         if dry_run:
-            log.info("[DRY-RUN] logid=%-8s  %-12s  %s: %r -> %r",
-                     logid, d.qso_with, d.adif_field, old_value, new_value)
-            resolutions.append(Resolution(
-                discrepancy=d, logid=logid,
-                old_value=old_value, new_value=new_value,
-                status="dry_run",
-            ))
+            for d, _logid, _key, old_value, new_value in items:
+                log.info("[DRY-RUN] logid=%-8s  %-12s  %s: %r -> %r",
+                         logid, d.qso_with, d.adif_field, old_value, new_value)
+                api_resolutions.append(Resolution(
+                    discrepancy=d, logid=logid,
+                    old_value=old_value, new_value=new_value,
+                    status="dry_run",
+                ))
             continue
 
-        # Apply correction via INSERT OPTION=REPLACE
+        # Build a single updated QSO dict with all field changes applied
         updated = dict(qso)
-        updated[d.adif_field] = new_value
+        for d, _logid, _key, old_value, new_value in items:
+            updated[d.adif_field] = new_value
 
+        fields_str = ", ".join(
+            f"{d.adif_field}: {old!r}->{new!r}"
+            for d, _, _, old, new in items
+        )
         try:
             result = qrz.qrz_replace(api_key, callsign, updated,
                                       user_agent="QRZDiscrepancyResolver/2.0")
             if result.get("RESULT") == "REPLACE":
-                log.info("Replaced logid=%-8s  %-12s  %s: %r -> %r",
-                         logid, d.qso_with, d.adif_field, old_value, new_value)
-                resolutions.append(Resolution(
-                    discrepancy=d, logid=logid,
-                    old_value=old_value, new_value=new_value,
-                    status="updated",
-                ))
-                # Update the index so subsequent corrections for the same QSO
-                # accumulate rather than each overwriting the previous field.
-                qso_index[key][d.adif_field] = new_value
+                log.info("Replaced logid=%-8s  %-12s  (%d field%s) %s",
+                         logid, items[0][0].qso_with, len(items),
+                         "s" if len(items) != 1 else "", fields_str)
+                for d, _logid, _key, old_value, new_value in items:
+                    api_resolutions.append(Resolution(
+                        discrepancy=d, logid=logid,
+                        old_value=old_value, new_value=new_value,
+                        status="updated",
+                    ))
+                # Update index so any later same-QSO lookups see fresh values
+                for d, _logid, _key, _old, new_value in items:
+                    qso_index[key][d.adif_field] = new_value
             else:
                 log.error("Unexpected result logid=%s: %s", logid, result)
-                resolutions.append(Resolution(
-                    discrepancy=d, logid=logid,
-                    old_value=old_value, new_value=new_value,
-                    status="error",
-                    error_msg=f"Unexpected RESULT: {result.get('RESULT')}",
-                ))
+                for d, _logid, _key, old_value, new_value in items:
+                    api_resolutions.append(Resolution(
+                        discrepancy=d, logid=logid,
+                        old_value=old_value, new_value=new_value,
+                        status="error",
+                        error_msg=f"Unexpected RESULT: {result.get('RESULT')}",
+                    ))
         except RuntimeError as exc:
             log.error("Failed   logid=%-8s  %s", logid, exc)
-            resolutions.append(Resolution(
-                discrepancy=d, logid=logid,
-                old_value=old_value, new_value=new_value,
-                status="error", error_msg=str(exc),
-            ))
+            for d, _logid, _key, old_value, new_value in items:
+                api_resolutions.append(Resolution(
+                    discrepancy=d, logid=logid,
+                    old_value=old_value, new_value=new_value,
+                    status="error", error_msg=str(exc),
+                ))
 
         time.sleep(qrz.API_PAUSE_SEC)
 
-    # Record bad-data skips
+    # ------------------------------------------------------------------
+    # Combine and record bad-data skips
+    # ------------------------------------------------------------------
+    resolutions = terminal + api_resolutions
+
     for d in discrepancies:
         if d.bad_data:
             resolutions.append(Resolution(
@@ -551,6 +619,10 @@ def resolve(
                 old_value=d.your_value, new_value=d.other_value,
                 status="skipped_bad_data",
             ))
+
+    if not dry_run and groups:
+        log.info("API calls made: %d (consolidated from %d field updates)",
+                 len(groups), len(pending))
 
     return resolutions
 
