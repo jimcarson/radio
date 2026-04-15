@@ -642,12 +642,15 @@ def write_csv(resolutions: list[Resolution], path: Path) -> None:
         writer = csv.DictWriter(f, fieldnames=CSV_HEADERS)
         writer.writeheader()
         for r in resolutions:
+            hr_date, hr_time = qrz.format_qso_datetime(
+                r.discrepancy.qso_date, r.discrepancy.time_on
+            )
             writer.writerow({
                 "sheet":      r.discrepancy.sheet,
                 "adif_field": r.discrepancy.adif_field,
                 "qso_with":   r.discrepancy.qso_with,
-                "qso_date":   r.discrepancy.qso_date,
-                "time_on":    r.discrepancy.time_on,
+                "qso_date":   hr_date,
+                "time_on":    hr_time,
                 "logid":      r.logid or "",
                 "old_value":  r.old_value,
                 "new_value":  r.new_value,

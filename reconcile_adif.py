@@ -44,6 +44,15 @@ Requirements
 See qrz_common.py for shared logic.
 Config file format: see load_field_rules() in qrz_common.py.
 
+Part of the QRZ Logbook Tools suite:
+  - qrz_common.py               -- shared library (not run directly)
+  - resolve_qrz_discrepancies.py -- bulk-correct your QRZ records via CSV or
+                                    QRZ Awards discrepancy export
+  - adif_extract.py             -- lightweight ADIF spreadsheet editor;
+                                    extract/filter to Excel, edit, round-trip
+                                    back to ADIF
+  - reconcile_adif.py           -- this file; LoTW vs QRZ field comparison
+
 2026-03-19 Jim Carson (WT8P)
 """
 
@@ -375,12 +384,15 @@ def write_csv_report(results: list[RecordResult], path: Path) -> None:
             # Always write no_match and error records even with no field changes
             if not rr.changes and rr.status == "ok":
                 continue
+            # Format date/time as human-readable for consistency with other
+            # tool outputs (adif_extract.py uses YYYY-MM-DD / HH:MM)
+            hr_date, hr_time = qrz.format_qso_datetime(rr.qso_date, rr.time_on)
             if rr.changes:
                 for fc in rr.changes:
                     writer.writerow({
                         "call":          rr.call,
-                        "qso_date":      rr.qso_date,
-                        "time_on":       rr.time_on,
+                        "qso_date":      hr_date,
+                        "time_on":       hr_time,
                         "band":          rr.band,
                         "mode":          rr.mode,
                         "logid":         rr.logid,
@@ -395,8 +407,8 @@ def write_csv_report(results: list[RecordResult], path: Path) -> None:
             else:
                 writer.writerow({
                     "call":          rr.call,
-                    "qso_date":      rr.qso_date,
-                    "time_on":       rr.time_on,
+                    "qso_date":      hr_date,
+                    "time_on":       hr_time,
                     "band":          rr.band,
                     "mode":          rr.mode,
                     "logid":         rr.logid,

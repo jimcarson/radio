@@ -288,8 +288,8 @@ python resolve_qrz_discrepancies.py \
 | `sheet` | Source sheet (`Grids`, `State`, `County`) |
 | `adif_field` | ADIF field corrected |
 | `qso_with` | Other party's callsign |
-| `qso_date` | YYYYMMDD |
-| `time_on` | HHMM |
+| `qso_date` | `YYYY-MM-DD` |
+| `time_on` | `HH:MM` |
 | `logid` | QRZ internal record ID |
 | `old_value` | Value in QRZ before correction |
 | `new_value` | Value applied (in ADIF format) |
@@ -575,8 +575,8 @@ One row per field-level discrepancy found. Clean records with no discrepancies a
 | Column | Description |
 |---|---|
 | `call` | Other party's callsign |
-| `qso_date` | YYYYMMDD |
-| `time_on` | HHMM |
+| `qso_date` | `YYYY-MM-DD` |
+| `time_on` | `HH:MM` |
 | `band` | Band |
 | `mode` | Mode |
 | `logid` | QRZ record ID |
