@@ -22,7 +22,7 @@ USE AT YOUR OWN RISK.  These are presented AS IS and without any warranty.
 |---|---|
 | `qrz_common.py` | Shared library — ADIF parsing, QRZ API client, field converters, Maidenhead grid utilities, config loading |
 | `resolve_qrz_discrepancies.py` | Corrects Grid, State, and County discrepancies reported by QRZ's Awards pages as well as allowing bulk correction of your own records. |
-| `adif_extract.py` | Lightweight ADIF spreadsheet editor. Extracts QSOs from any ADIF file (QRZ, LoTW, N3FJP, WSJT-X) to a formatted Excel workbook or CSV; supports date filtering, preset field views, and round-trip editing (Excel → ADIF). |
+| `adif_extract.py` | Extracts QSOs from a QRZ ADIF export to an inspection CSV; supports date-range and single-date filtering. Produces a ready-to-edit file that feeds directly into `resolve_qrz_discrepancies.py`. |
 | `reconcile_adif.py` | Compares LoTW and QRZ ADIF exports and optionally pushes corrections to QRZ |
 | `sample_corrections.csv` | Annotated sample CSV covering all supported `field` keywords — copy and edit for your own use |
 
@@ -121,7 +121,6 @@ python resolve_qrz_discrepancies.py \
 --adif <file>               Your QRZ ADIF export (must contain APP_QRZLOG_LOGID)
 --call <callsign>           Your callsign (e.g. WT8P or TF/WT8P)
 --key <api-key>             QRZ API key — optional if <CALLSIGN>.key file exists
---my-station                Correct your own station's fields instead of the other party's
 --update                    Apply changes to QRZ (default is dry-run — preview only)
 --derive-coords             Derive related fields automatically (see Coordinate Derivation below)
 --grid-precision {4,6,8}    Maidenhead precision when deriving grid from coordinates (default: 6)
@@ -130,7 +129,9 @@ python resolve_qrz_discrepancies.py \
 
 ### Input: Excel
 
-The Excel file exported from QRZ's discrepancy view contains three worksheets:
+The Excel file can contain named sheets from the QRZ discrepancy export as well as an optional `MISC` sheet for anything else.
+
+**Named sheets** (always correct the other party's fields):
 
 | Sheet | ADIF field corrected |
 |---|---|
@@ -139,6 +140,10 @@ The Excel file exported from QRZ's discrepancy view contains three worksheets:
 | `County` | `CNTY` |
 
 Column headers are matched by prefix, so `You Entered county`, `You Entered grid`, etc. all work. Rows where `Note` = `Bad Data` are skipped automatically.
+
+**MISC sheet** (optional, supports all field keywords):
+
+Add a sheet named `MISC` to your workbook with the same column format as the flat CSV: `field`, `qso_date`, `qso_with`, `new_value`, and optionally `note`. This sheet accepts every field keyword listed in the CSV Field Reference below — including `MY_GRIDSQUARE`, `MY_LOC`, `MY_LAT`/`MY_LON`, `MY_STATE`, `MY_CNTY`, and `COMMENT` — making it the easiest way to correct your own station fields from within the same Excel workbook. The `--derive-coords` and `--grid-precision` options apply to MISC sheet rows exactly as they do to CSV rows. Blank rows and rows whose first cell starts with `#` are skipped.
 
 ### Input: Flat CSV (`--input-csv`)
 
@@ -162,7 +167,7 @@ The following example covers all supported `field` keywords. W1AW (the ARRL club
 field,qso_date,qso_with,new_value,note
 
 # ── Other party's fields ──────────────────────────────────────────────────────
-# Correct the other party's grid square (bare name, no --my-station needed)
+# Correct the other party's grid square.
 GRIDSQUARE,2024-07-06 20:28:00,W1AW,FN31
 
 # Correct the other party's state. Non-standard abbreviations (e.g. TEN → TN)
@@ -177,9 +182,8 @@ CNTY,2025-08-11 02:22:00,W1AW,"Hartford County, CT"
 # Mark a row as bad data to skip it without removing it from the file.
 GRIDSQUARE,2024-03-01 14:00:00,W1AW,LNA,Bad Data
 
-# ── Your own station's fields (requires --my-station) ─────────────────────────
-# Bare names (GRIDSQUARE, STATE, CNTY) are promoted to MY_ equivalents
-# when --my-station is active. You can also use the MY_ names directly.
+# ── Your own station's fields ────────────────────────────────────────────────
+# Use the MY_ prefix directly — no flag needed.
 
 # Your grid square
 MY_GRIDSQUARE,2025-08-11 02:22:00,W1AW,CN87xn
@@ -210,7 +214,7 @@ MY_LOC,2025-08-11 02:22:00,W1AW,"47.5625,-122.058"
 MY_GRIDSQUARE,2025-08-11 02:22:00,W1AW,CN87xn
 
 # ── Comment field ──────────────────────────────────────────────────────────────
-# COMMENT sets the QRZ logbook comment. Valid with or without --my-station.
+# COMMENT sets the QRZ logbook comment.
 # Useful for adding or correcting POTA/SOTA park references logged in the field.
 COMMENT,2026-03-28 16:35:00,AB0LV,US-3263 Scenic Beach State Park WA
 ```
@@ -228,19 +232,11 @@ COMMENT,2026-03-28 16:35:00,AB0LV,US-3263 Scenic Beach State Park WA
 | `MY_LAT` | `MY_LAT` | Your latitude (decimal or ADIF native format) |
 | `MY_LON` | `MY_LON` | Your longitude (decimal or ADIF native format) |
 | `MY_LOC` | `MY_LAT` + `MY_LON` | Combined lat/lon — value must be quoted `"lat,lon"`; also updates `MY_GRIDSQUARE` with `--derive-coords` |
-| `COMMENT` | `COMMENT` | QRZ logbook comment (free text); valid with or without `--my-station` |
+| `COMMENT` | `COMMENT` | QRZ logbook comment (free text) |
 
-### Correcting Your Own Station's Fields (`--my-station`)
+### Correcting Your Own Station's Fields
 
-Use `--my-station` to correct your own station's fields (`MY_GRIDSQUARE`, `MY_STATE`, `MY_CNTY`, `MY_LAT`, `MY_LON`) instead of the other party's fields. The input format is identical — bare field names are automatically promoted to their `MY_` equivalents.
-
-```bash
-python resolve_qrz_discrepancies.py \
-    --input-csv my_corrections.csv \
-    --adif wt8p.adi \
-    --call WT8P \
-    --my-station
-```
+Use the `MY_` prefix in the `field` column to correct your own station fields — no special flag is needed. `MY_GRIDSQUARE`, `MY_STATE`, `MY_CNTY`, `MY_LAT`, `MY_LON`, and `MY_LOC` are all valid keywords in both the flat CSV and the Excel `MISC` sheet.
 
 **`MY_LAT` and `MY_LON`** accept either decimal degrees or ADIF native format:
 
@@ -268,7 +264,7 @@ Use `--grid-precision` to set the number of Maidenhead characters when deriving 
 | 6 | e.g. `CN87xn` | ~460 m (default) |
 | 8 | e.g. `CN87xn35` | ~4 m |
 
-> **Note:** When deriving coordinates *from* a grid square, the lat/lon written to QRZ is the centre point of that square. A 6-character grid can place you up to ~230 m from your actual position. If precision matters, use `MY_LOC` with your actual decimal coordinates and let `--derive-coords` derive the grid from those.
+> **Note:** When deriving coordinates *from* a grid square, the grid must be at least 6 characters — a 4-character grid spans ~55 km and is rejected as too coarse. The lat/lon written to QRZ is the centre point of the square, which for a 6-character grid can be up to ~230 m from your actual position. If precision matters, use `MY_LOC` with your actual decimal coordinates and let `--derive-coords` derive the grid from those.
 
 ```bash
 # Field operation: app gives you a precise grid — update all three fields
@@ -276,7 +272,6 @@ python resolve_qrz_discrepancies.py \
     --input-csv my_corrections.csv \
     --adif wt8p.adi \
     --call WT8P \
-    --my-station \
     --derive-coords \
     --grid-precision 6
 ```
@@ -288,8 +283,8 @@ python resolve_qrz_discrepancies.py \
 | `sheet` | Source sheet (`Grids`, `State`, `County`) |
 | `adif_field` | ADIF field corrected |
 | `qso_with` | Other party's callsign |
-| `qso_date` | `YYYY-MM-DD` |
-| `time_on` | `HH:MM` |
+| `qso_date` | YYYYMMDD |
+| `time_on` | HHMM |
 | `logid` | QRZ internal record ID |
 | `old_value` | Value in QRZ before correction |
 | `new_value` | Value applied (in ADIF format) |
@@ -308,175 +303,85 @@ The script uses `ACTION=INSERT` with `OPTION=REPLACE` on the QRZ API. Including 
 
 Records are matched using: **Callsign + Date + Time (HHMM)**.
 
-**API call consolidation:** When multiple fields on the same QSO need correction (e.g. `MY_GRIDSQUARE`, `MY_LAT`, `MY_LON`, and `COMMENT` all on the same record), all changes are applied in a single `INSERT OPTION=REPLACE` call rather than one call per field. This is both faster and safer — it eliminates the risk of a partial update if the script is interrupted mid-run. The output CSV still records one row per field corrected, with the logid repeating across rows for the same QSO. The summary line at the end of a run shows how many API calls were made versus how many field updates were applied.
-
 ---
 
 ## `adif_extract.py`
 
-A lightweight ADIF spreadsheet editor. Extracts QSOs from any ADIF file to a formatted Excel workbook or CSV, lets you make corrections directly in Excel, then converts the edited workbook back to ADIF. Works with QRZ, LoTW, N3FJP, WSJT-X, and any other ADIF-producing program.
+Extracts QSOs from a QRZ ADIF export to an inspection CSV, with optional date-range or single-date filtering. Designed for the common portable-operations workflow: export a range of contacts from QRZ, spot-check `MY_` fields and `COMMENT` in Excel, fill in corrections, then feed the result back to `resolve_qrz_discrepancies.py`.
 
 Does not call the QRZ API and requires no API key.
 
-### Two Modes
+### Quick Start
 
-| Mode | Trigger | Purpose |
-|---|---|---|
-| Extract | `--adif FILE` | ADIF → Excel / CSV for inspection and editing |
-| Round-trip | `--from-xlsx FILE` | Edited Excel → ADIF for import or further processing |
-
-### Typical POTA / Portable Workflow
+**1. Extract a single activation date**
 
 ```bash
-# 1. Extract a single activation to a full editable Excel workbook
-python adif_extract.py --adif wt8p.adi --date 2026-03-28 --output-xlsx pota_scenic.xlsx --no-csv
-
-# 2. Open pota_scenic.xlsx in Excel.
-#    Correct values in any cell. Delete columns you don't need.
-#    Delete rows you don't want to reimport. Save.
-
-# 3. Convert the edited workbook back to ADIF
-python adif_extract.py --from-xlsx pota_scenic.xlsx --output-adif pota_fixed.adi
-
-# 4a. Import pota_fixed.adi into your logging program directly, OR
-# 4b. Use it as the --adif source for resolve_qrz_discrepancies.py
-python resolve_qrz_discrepancies.py \
-    --input-csv corrections.csv \
-    --adif pota_fixed.adi \
-    --call WT8P \
-    --my-station \
-    --derive-coords
+python adif_extract.py --adif wt8p.adi --date 2026-03-28
 ```
 
-### Narrow CSV Workflow (resolve-only)
-
-If you only need to feed corrections into `resolve_qrz_discrepancies.py` and don't need to edit the full record, the narrow CSV is simpler:
+**2. Extract a date range**
 
 ```bash
-# Extract inspection CSV (qrz preset by default)
-python adif_extract.py --adif wt8p.adi --date 2026-03-28
+python adif_extract.py --adif wt8p.adi --after 2026-03-20 --before 2026-03-31 --output-csv march_pota.csv
+```
 
-# Open adif_extract.csv, fill in 'field' and 'new_value' columns, save.
+**3. Open the CSV in Excel, review and fill in corrections**
 
+The `field` and `new_value` columns are blank — add the field to correct and its new value on each row. Duplicate a row if the same QSO needs multiple corrections. Delete rows you don't need to change.
+
+**4. Feed the edited CSV to resolve_qrz_discrepancies.py**
+
+```bash
 python resolve_qrz_discrepancies.py \
-    --input-csv adif_extract.csv \
+    --input-csv march_pota.csv \
     --adif wt8p.adi \
     --call WT8P \
-    --my-station \
     --derive-coords
 ```
 
 ### All Options
 
 ```
-Input mode (required, mutually exclusive):
-  --adif <file>             Source ADIF file (QRZ, LoTW, N3FJP, WSJT-X, ...)
-  --from-xlsx <file>        Convert an edited Full Excel workbook back to ADIF
-
-Date filtering (extract mode only):
-  --date <DATE>             Single date — shorthand for --after DATE --before DATE
-                            Mutually exclusive with --after.
-  --after <DATE>            Include QSOs on or after this date (inclusive)
-  --before <DATE>           Include QSOs on or before this date (inclusive)
-
-Field selection (extract mode only):
-  --preset {qrz,lotw,n3fjp,wsjtx}
-                            Named inspection column set (default: qrz)
-  --fields FIELD1,FIELD2,...
-                            Explicit comma-separated list of inspection columns.
-                            Mutually exclusive with --preset.
-
-Outputs:
-  --output-csv <file>       Narrow inspection CSV (default: adif_extract.csv)
-  --no-csv                  Suppress CSV — useful when only --output-xlsx is wanted
-  --output-xlsx <file>      Full Excel workbook with all ADIF fields from the source
-  --output-adif <file>      ADIF output for --from-xlsx round-trip
-                            (default: adif_extract.adi)
+--adif <file>           QRZ ADIF export file (required)
+--date <DATE>           Extract a single date — shorthand for --after DATE --before DATE
+                        Mutually exclusive with --after.
+--after <DATE>          Include QSOs on or after this date (inclusive)
+--before <DATE>         Include QSOs on or before this date (inclusive)
+--output-csv <file>     Output CSV filename (default: adif_extract.csv)
 ```
 
 Date formats accepted for all date arguments: `YYYY-MM-DD` or `YYYYMMDD`.
 
-### Presets (`--preset`)
-
-Presets control which fields appear as the highlighted inspection columns in the CSV and Excel — placed immediately after the key identity columns (`QSO_DATE`, `TIME_ON`, `CALL`, `BAND`, `MODE`, `FREQ`). In Full Excel mode, all other ADIF fields from the source file are also included, alphabetically after the preset columns.
-
-| Preset | Fields included |
-|---|---|
-| `qrz` *(default)* | `MY_GRIDSQUARE` `MY_LAT` `MY_LON` `MY_STATE` `MY_CNTY` `MY_CITY` `MY_COUNTRY` `MY_CQ_ZONE` `MY_ITU_ZONE` `MY_DXCC` `MY_NAME` `COMMENT` |
-| `lotw` | `GRIDSQUARE` `STATE` `CNTY` `DXCC` `CQZ` `ITUZ` `CONT` `QSL_RCVD` `LOTW_QSL_RCVD` `APP_LOTW_2XQSL` `APP_LOTW_RXQSL` |
-| `n3fjp` | `RST_SENT` `RST_RCVD` `FREQ` `BAND` `MODE` `PROGRAMID` `LOG_PGM` |
-| `wsjtx` | `RST_SENT` `RST_RCVD` `FREQ` `BAND` `MODE` `GRIDSQUARE` `COMMENT` |
-
-Use `--fields` to specify any arbitrary list of fields not covered by a preset.
-
-### Output: Full Excel (`--output-xlsx`)
-
-The Full Excel workbook contains every ADIF field present anywhere in the source file, formatted for direct editing:
-
-- **Column order:** key identity fields → preset/`--fields` inspection columns (highlighted in medium blue) → all remaining fields alphabetically (dark navy header)
-- **Frozen panes:** header row and first four columns stay visible when scrolling
-- **Auto-filter** on the header row for sorting and filtering
-- **Column widths** sized by field type (narrow for codes and dates, wider for free text)
-- `QSO_DATE` and `TIME_ON` are displayed as `YYYY-MM-DD` and `HH:MM` for readability
-
-**Editing tips:**
-- Delete entire columns to exclude those fields from the output ADIF
-- Delete rows to exclude QSOs from reimport
-- Edit any cell value directly — the round-trip will write whatever is in the sheet
-- The `field` and `new_value` columns from the narrow CSV are not present in the Full Excel; add them manually after round-tripping if you then want to feed the result into `resolve_qrz_discrepancies.py` as an `--input-csv`
-
-### Output: Narrow CSV (default)
-
-The narrow CSV contains only the key identity columns, the preset/`--fields` inspection columns, and two blank placeholder columns:
+### Output CSV Columns
 
 | Column | Description |
 |---|---|
 | `field` | **Blank — fill in** the ADIF field name to correct (e.g. `MY_GRIDSQUARE`, `COMMENT`) |
-| `qso_date` | `YYYY-MM-DD` |
-| `time_on` | `HH:MM` |
+| `qso_date` | QSO date in `YYYY-MM-DD` format |
+| `time_on` | QSO time in `HH:MM` format |
 | `call` | Contacted station callsign |
-| *(preset columns)* | Current values from the ADIF for spot-checking |
+| `MY_GRIDSQUARE` | Your grid square as logged |
+| `MY_LAT` | Your latitude (ADIF format) |
+| `MY_LON` | Your longitude (ADIF format) |
+| `MY_STATE` | Your state |
+| `MY_CNTY` | Your county (ADIF format, e.g. `WA,Kitsap`) |
+| `MY_CITY` | Your city |
+| `MY_COUNTRY` | Your country |
+| `MY_CQ_ZONE` | Your CQ zone |
+| `MY_ITU_ZONE` | Your ITU zone |
+| `MY_DXCC` | Your DXCC entity code |
+| `MY_NAME` | Your name as logged |
+| `COMMENT` | QRZ logbook comment |
 | `new_value` | **Blank — fill in** the corrected value |
 
-Fill in `field` and `new_value`, then pass the CSV to `resolve_qrz_discrepancies.py --input-csv`.
+### Typical POTA / Portable Workflow
 
-### Round-Trip: Excel → ADIF (`--from-xlsx`)
+When logging in the field, apps like N3FJP or WSJT-X may capture your grid automatically but sometimes use your home location for lat/lon, or a QRZ upload can overwrite the correct grid with your default location. The typical correction flow is:
 
-Converts an edited Full Excel workbook back to ADIF:
-
-- Every non-blank cell becomes an ADIF field; the column header is the field name
-- Columns named `field` or `new_value` are silently skipped
-- `QSO_DATE` / `QSO_DATE_OFF` (`YYYY-MM-DD`) are converted back to ADIF compact `YYYYMMDD`
-- `TIME_ON` / `TIME_OFF` (`HH:MM`) are converted back to `HHMM`
-- `APP_QRZLOG_LOGID` is preserved if present, enabling later use with `resolve_qrz_discrepancies.py`
-- The output ADIF contains only the columns still present in the sheet — deleted columns produce no ADIF fields
-
-### Examples
-
-```bash
-# Full Excel for a date range, LoTW field view, no CSV
-python adif_extract.py \
-    --adif lotw_export.adi \
-    --after 2026-01-01 --before 2026-03-31 \
-    --preset lotw \
-    --output-xlsx lotw_q1.xlsx \
-    --no-csv
-
-# Custom fields — just the fields you care about
-python adif_extract.py \
-    --adif wt8p.adi \
-    --fields GRIDSQUARE,MY_GRIDSQUARE,FREQ,MODE,COMMENT \
-    --output-xlsx custom_view.xlsx \
-    --no-csv
-
-# Extract N3FJP log, edit in Excel, convert back for LoTW upload
-python adif_extract.py --adif n3fjp_log.adi --preset n3fjp --output-xlsx n3fjp_review.xlsx
-# ... edit n3fjp_review.xlsx ...
-python adif_extract.py --from-xlsx n3fjp_review.xlsx --output-adif n3fjp_cleaned.adi
-
-# Round-trip with explicit output name
-python adif_extract.py --from-xlsx pota_scenic.xlsx --output-adif scenic_beach_fixed.adi
-```
+1. After an activation, export your full QRZ ADIF (or use a previous export if it's current).
+2. Run `adif_extract.py --date <activation-date>` to pull just that day's QSOs.
+3. In Excel: verify `MY_GRIDSQUARE`, `MY_LAT`, `MY_LON`, and `COMMENT`. For each field that needs correcting, set `field` = the ADIF field name and `new_value` = the correct value.
+4. Save as CSV and run `resolve_qrz_discrepancies.py --input-csv ... --derive-coords`. With `--derive-coords`, a single `MY_GRIDSQUARE` correction (6+ characters) will also update `MY_LAT` and `MY_LON` from the grid centre automatically.
 
 ---
 
@@ -575,8 +480,8 @@ One row per field-level discrepancy found. Clean records with no discrepancies a
 | Column | Description |
 |---|---|
 | `call` | Other party's callsign |
-| `qso_date` | `YYYY-MM-DD` |
-| `time_on` | `HH:MM` |
+| `qso_date` | YYYYMMDD |
+| `time_on` | HHMM |
 | `band` | Band |
 | `mode` | Mode |
 | `logid` | QRZ record ID |
@@ -611,10 +516,9 @@ This file is used by all scripts and is not run directly. It provides:
 
 ## Notes
 
-- Always run `resolve_qrz_discrepancies.py` without `--update` first to verify matches and proposed values before writing.
+- Always run without `--update` first to verify matches and proposed values before writing.
 - Export a fresh ADIF from QRZ before each run — `APP_QRZLOG_LOGID` values can change if records were previously updated.
-- The scripts pause 1 second between API calls to avoid rate limiting. When multiple fields on the same QSO are being corrected, they are consolidated into a single API call automatically.
+- The scripts pause 1 second between API calls to avoid rate limiting.
 - For `reconcile_adif.py`, unmatched LoTW records (no corresponding QRZ entry) are logged in the CSV as `no_match` — this is normal for contacts logged in LoTW before you joined QRZ, or contacts the other party hasn't logged in QRZ.
 - QRZ's user interface will report counties with "County" or "Borough" (Alaska only), which differs from what is contained in the ADIF file.  We will strip that off for you, so no worries.
 - In some cases, bad data is reported by the other person.  For example, if a user specifies their grid as "LNA."  You can mark these as bad data, or the API will simply fail silently.  There's really no remedy from our side.
-- When round-tripping through Excel (`adif_extract.py --output-xlsx` → edit → `--from-xlsx`), columns deleted from the workbook will be absent from the output ADIF. This is intentional — the sheet is the source of truth. Start from a fresh QRZ export if you need to restore dropped fields.

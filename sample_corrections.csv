@@ -1,8 +1,7 @@
 field,qso_date,qso_with,new_value,note
 
 # ── Other party's fields ──────────────────────────────────────────────────────
-# Use these without --my-station.  Bare names (GRIDSQUARE, STATE, CNTY) refer
-# to the other party's logged values.
+# Bare names (GRIDSQUARE, STATE, CNTY) refer to the other party's logged values.
 
 # Correct the other party's grid square.
 GRIDSQUARE,2024-07-06 20:28:00,W1AW,FN31
@@ -19,9 +18,8 @@ CNTY,2025-08-11 02:22:00,W1AW,"Hartford County, CT"
 # Mark a row as bad data to skip it without deleting it from the file.
 GRIDSQUARE,2024-03-01 14:00:00,W1AW,LNA,Bad Data
 
-# ── Your own station's fields (requires --my-station) ─────────────────────────
-# Bare names (GRIDSQUARE, STATE, CNTY) are promoted to their MY_ equivalents
-# when --my-station is active.  You can also use the MY_ names directly.
+# ── Your own station's fields ─────────────────────────────────────────────────
+# Use the MY_ prefix directly — no special flag needed.
 
 # Your grid square.
 MY_GRIDSQUARE,2025-08-11 02:22:00,W1AW,CN87xn
@@ -47,7 +45,7 @@ MY_LOC,2025-08-11 02:22:00,W1AW,"47.5625,-122.058"
 # ── Grid square with coordinate derivation (--derive-coords) ──────────────────
 # When --derive-coords is active, a MY_GRIDSQUARE row also emits MY_LAT and
 # MY_LON updates derived from the centre of the specified grid square.
-# Useful when your logging app gives you a precise grid and you want all three
-# fields updated in one go.  Use --grid-precision (4, 6, or 8; default 6) to
-# control the resolution when deriving a grid from coordinates.
+# The grid must be at least 6 characters — a 4-character grid spans ~55 km
+# and is rejected as too coarse.  Use --grid-precision (4, 6, or 8; default 6)
+# to control the resolution when deriving a grid from coordinates.
 MY_GRIDSQUARE,2025-08-11 02:22:00,W1AW,CN87xn
