@@ -59,6 +59,11 @@ CSV field keywords (--input-csv)
                                            MY_GRIDSQUARE.
     MY_GRIDSQUARE (with --derive-coords) — also updates MY_LAT and MY_LON
                                            from the grid centre.
+    MY_CITY                              — your station city / QTH
+    MY_COUNTRY                           — your station country
+    MY_CQ_ZONE                           — your CQ zone number
+    MY_ITU_ZONE                          — your ITU zone number
+    MY_NAME                              — your name as logged
     COMMENT                              — QRZ logbook comment (free text);
                                            valid in both --my-station and
                                            other-party modes.
@@ -121,12 +126,17 @@ MY_COORD_FIELDS = {"MY_LAT", "MY_LON", "MY_LOC"}
 # modes.  It is not prefixed MY_ and has no Excel sheet equivalent.
 COMMENT_FIELDS = {"COMMENT"}
 
+# Additional MY_ informational fields (CSV only, no Excel sheet equivalent,
+# no special value conversion — passed through to QRZ as-is).
+MY_INFO_FIELDS = {"MY_CITY", "MY_COUNTRY", "MY_CQ_ZONE", "MY_ITU_ZONE", "MY_NAME"}
+
 # All valid ADIF fields across both modes
 ALL_ADIF_FIELDS = (
     set(SHEET_TO_ADIF_FIELD.values())
     | set(SHEET_TO_MY_ADIF_FIELD.values())
     | MY_COORD_FIELDS
     | COMMENT_FIELDS
+    | MY_INFO_FIELDS
 )
 
 
@@ -262,6 +272,9 @@ def load_discrepancies_csv(csv_path: Path,
                                  expands to MY_LAT + MY_LON rows, and with
                                  --derive-coords also MY_GRIDSQUARE.
                        MY_GRIDSQUARE + --derive-coords also emits MY_LAT/MY_LON.
+                       MY_CITY, MY_COUNTRY, MY_CQ_ZONE, MY_ITU_ZONE, MY_NAME —
+                                 your station informational fields; passed through
+                                 to QRZ as-is (no special conversion).
                        COMMENT — QRZ logbook comment field; accepted in both
                                  --my-station and other-party modes.
 
@@ -689,7 +702,8 @@ def build_parser() -> argparse.ArgumentParser:
              "(use _ for / in callsign, e.g. TF_WT8P.key)")
     p.add_argument("--my-station", action="store_true",
         help="Correct your own station fields (MY_GRIDSQUARE, MY_STATE, "
-             "MY_CNTY, MY_LAT, MY_LON) instead of the other party's fields")
+             "MY_CNTY, MY_LAT, MY_LON, MY_CITY, MY_COUNTRY, MY_CQ_ZONE, "
+             "MY_ITU_ZONE, MY_NAME) instead of the other party's fields")
     p.add_argument("--update", action="store_true",
         help="Apply changes to QRZ (default is dry-run — preview only)")
     p.add_argument("--derive-coords", action="store_true",
