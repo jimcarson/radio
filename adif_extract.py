@@ -236,7 +236,7 @@ def write_csv(rows_narrow: list[dict], inspection_fields: list[str],
               path: Path) -> None:
     cols = (["field", "qso_date", "time_on", "call"]
             + inspection_fields + ["new_value"])
-    with path.open("w", newline="", encoding="utf-8") as f:
+    with path.open("w", newline="", encoding="utf-8-sig") as f:
         writer = csv.DictWriter(f, fieldnames=cols, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(rows_narrow)
