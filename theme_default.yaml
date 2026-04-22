@@ -1,0 +1,67 @@
+# theme_default.yaml — adif_map.py color and style theme
+# Copy this file and pass --theme mytheme.yaml to use a custom palette.
+# All color values are CSS hex strings.
+
+# ---------------------------------------------------------------------------
+# Contact dot style
+# ---------------------------------------------------------------------------
+contact_dot:
+  radius:        6      # circle radius in pixels
+  fill_opacity:  0.85   # fill transparency (0=invisible, 1=solid)
+  border_color:  white  # dot outline color
+  border_weight: 1.2    # dot outline width in pixels
+
+# ---------------------------------------------------------------------------
+# Contact dot colors by band
+# ---------------------------------------------------------------------------
+band_colors:
+  160m: "#8B0000"
+  80m:  "#CC2200"
+  60m:  "#DD4400"
+  40m:  "#FF6600"
+  30m:  "#FF9900"
+  20m:  "#FFD700"
+  17m:  "#AACC00"
+  15m:  "#44BB00"
+  12m:  "#00AAAA"
+  10m:  "#0077DD"
+  6m:   "#5500DD"
+  2m:   "#AA00CC"
+  70cm: "#CC00AA"
+
+# Fallback color for bands not listed above
+default_color: "#888888"
+
+# ---------------------------------------------------------------------------
+# Overlay choropleth colors and styles
+# ---------------------------------------------------------------------------
+overlay:
+
+  # US states + Canadian provinces (base layer, lighter)
+  states:
+    confirmed:        "#2ecc71"   # medium green fill
+    worked:           "#f39c12"   # amber fill
+    border_confirmed: "#1a7a45"   # darker green border
+    border_worked:    "#b8860b"   # darker amber border
+    confirmed_weight: 2.0         # border stroke width — confirmed states
+    worked_weight:    2.0         # border stroke width — worked states
+    unworked_fill:    "#ffffff"   # fill for unworked states
+    unworked_border:  "#666666"   # border for unworked states
+    unworked_weight:  0.8         # border width for unworked states
+    unworked_opacity: 0.0         # fill opacity for unworked (0=transparent)
+
+  # US counties (nested — darker shades of state colors)
+  counties:
+    confirmed:        "#1a8a4a"   # dark forest green fill
+    worked:           "#c0720a"   # burnt amber fill
+    border_confirmed: "#0d4d28"   # deep dark green border
+    border_worked:    "#7d4e07"   # deep amber border
+    unworked_fill:    "#ffffff"   # fill for unworked counties
+    unworked_border:  "#888888"   # border for unworked counties
+    unworked_weight:  0.5         # border width for unworked counties
+    unworked_opacity: 0.0         # fill opacity for unworked (0=transparent)
+
+  # Maidenhead grid squares (orange/yellow — visually distinct from state/county)
+  grids:
+    confirmed:        "#e67e22"   # orange
+    worked:           "#f7dc6f"   # yellow

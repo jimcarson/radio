@@ -15,14 +15,17 @@ Usage:
 
 Options:
     --band BAND             Filter by band (e.g. 40m, 20m, 2m)
-    --mode MODE             Filter by single mode — e.g. --mode CW (kept for compatibility)
-    --modes LIST            Filter by multiple modes — e.g. --modes CW,SSB,FT8
+    --mode MODE             Filter by single mode (kept for compatibility)
+    --modes LIST            Filter by multiple modes (e.g. --modes CW,SSB,FT8)
     --date-from DATE        Filter QSOs on or after date (YYYYMMDD or YYYY-MM-DD)
     --date-to DATE          Filter QSOs on or before date (YYYYMMDD or YYYY-MM-DD)
     --confirmed             Only show confirmed QSOs (LoTW or QSL card received)
-    --no-arcs               Suppress great-circle arc lines
-    --cluster-by-band       Separate cluster bubble per band (default: all bands together)
-    --overlay LIST          Comma-separated overlays: grids,states,counties
+    --show-arcs             Show great-circle arc lines (default: off — slow on large logs)
+    parser.add_argument("--show-mode-filters", dest="show_filters", action="store_true",
+                        help="Show collapsible mode filter panel (top-left corner)")
+    --overlay LIST          Comma-separated overlays: grids, states, counties
+    --theme FILE            Color theme YAML file (default: theme_default.yaml)
+    --verbose               Detailed console output: all station locations, band breakdown
     --output FILE           Output HTML filename (default: map_output.html next to input file)
 """
 
@@ -31,6 +34,12 @@ import math
 import sys
 import webbrowser
 from pathlib import Path
+
+try:
+    import yaml
+    _YAML_AVAILABLE = True
+except ImportError:
+    _YAML_AVAILABLE = False
 
 try:
     import folium
@@ -52,24 +61,102 @@ except ImportError:
 
 
 # ---------------------------------------------------------------------------
-# Band colour palette (Leaflet-compatible colour names or hex)
+# Theme / color configuration
 # ---------------------------------------------------------------------------
-BAND_COLORS = {
-    "160m": "#8B0000",
-    "80m":  "#CC2200",
-    "60m":  "#DD4400",
-    "40m":  "#FF6600",
-    "30m":  "#FF9900",
-    "20m":  "#FFD700",
-    "17m":  "#AACC00",
-    "15m":  "#44BB00",
-    "12m":  "#00AAAA",
-    "10m":  "#0077DD",
-    "6m":   "#5500DD",
-    "2m":   "#AA00CC",
-    "70cm": "#CC00AA",
+
+_THEME_DEFAULTS = {
+    "band_colors": {
+        "160m": "#8B0000", "80m": "#CC2200", "60m": "#DD4400",
+        "40m":  "#FF6600", "30m": "#FF9900", "20m": "#FFD700",
+        "17m":  "#AACC00", "15m": "#44BB00", "12m": "#00AAAA",
+        "10m":  "#0077DD", "6m":  "#5500DD", "2m":  "#AA00CC",
+        "70cm": "#CC00AA",
+    },
+    "default_color": "#888888",
+    "contact_dot": {
+        "radius": 6,
+        "fill_opacity": 0.85,
+        "border_color": "white",
+        "border_weight": 1.2,
+    },
+    "overlay": {
+        "states":   {
+            "confirmed": "#2ecc71", "worked": "#f39c12",
+            "border_confirmed": "#1a7a45", "border_worked": "#b8860b",
+            "confirmed_weight": 2.0, "worked_weight": 2.0,
+            "unworked_fill": "#ffffff", "unworked_border": "#666666",
+            "unworked_weight": 0.8, "unworked_opacity": 0.0,
+        },
+        "counties": {
+            "confirmed": "#1a8a4a", "worked": "#c0720a",
+            "border_confirmed": "#0d4d28", "border_worked": "#7d4e07",
+            "unworked_fill": "#ffffff", "unworked_border": "#888888",
+            "unworked_weight": 0.5, "unworked_opacity": 0.0,
+        },
+        "grids": {
+            "confirmed": "#e67e22", "worked": "#f7dc6f",
+        },
+    },
 }
-DEFAULT_COLOR = "#888888"
+
+# Populated by load_theme() called from main()
+BAND_COLORS:     dict = {}
+DEFAULT_COLOR:   str  = "#888888"
+OVERLAY_COLORS:  dict = {"confirmed": "#2ecc71", "worked": "#f39c12"}
+STATES_COLORS:   dict = {}
+COUNTIES_COLORS: dict = {}
+GRIDS_COLORS:    dict = {}
+
+
+def load_theme(theme_path=None) -> None:
+    """
+    Load color theme from a YAML file into module-level color constants.
+    Falls back to _THEME_DEFAULTS if file not found or yaml not installed.
+    theme_path: Path or str, or None to use theme_default.yaml beside this script.
+    """
+    global BAND_COLORS, DEFAULT_COLOR, OVERLAY_COLORS
+    global STATES_COLORS, COUNTIES_COLORS, GRIDS_COLORS
+
+    theme = dict(_THEME_DEFAULTS)
+
+    if theme_path is None:
+        theme_path = Path(__file__).parent / "theme_default.yaml"
+    else:
+        theme_path = Path(theme_path)
+
+    if theme_path.exists():
+        if not _YAML_AVAILABLE:
+            print(f"  Warning: pyyaml not installed — using built-in defaults.")
+            print(f"    pip install pyyaml")
+        else:
+            try:
+                with theme_path.open(encoding="utf-8") as f:
+                    loaded = yaml.safe_load(f)
+                if loaded:
+                    # Deep-merge: overlay sub-keys are merged individually
+                    if "band_colors" in loaded:
+                        theme["band_colors"].update(loaded["band_colors"])
+                    if "default_color" in loaded:
+                        theme["default_color"] = loaded["default_color"]
+                    if "overlay" in loaded:
+                        for key, vals in loaded["overlay"].items():
+                            if key in theme["overlay"]:
+                                theme["overlay"][key].update(vals)
+                            else:
+                                theme["overlay"][key] = vals
+                print(f"  Theme loaded: {theme_path.name}")
+            except Exception as exc:
+                print(f"  Warning: could not load theme {theme_path}: {exc}")
+    elif theme_path.name != "theme_default.yaml":
+        print(f"  Warning: theme file not found: {theme_path}")
+
+    BAND_COLORS    = theme["band_colors"]
+    DEFAULT_COLOR  = theme["default_color"]
+    STATES_COLORS  = theme["overlay"]["states"]
+    COUNTIES_COLORS= theme["overlay"]["counties"]
+    GRIDS_COLORS   = theme["overlay"]["grids"]
+    OVERLAY_COLORS = {"confirmed": STATES_COLORS["confirmed"],
+                      "worked":    STATES_COLORS["worked"]}
 
 
 # ---------------------------------------------------------------------------
@@ -223,7 +310,19 @@ def apply_filters(records, args):
 # ---------------------------------------------------------------------------
 # Map building
 # ---------------------------------------------------------------------------
-def build_map(my_coords, records, show_arcs: bool, cluster_by_band: bool = False):
+# ---------------------------------------------------------------------------
+# Mode grouping for the browser-side toggle panel
+# ---------------------------------------------------------------------------
+MODE_GROUPS = [
+    ("CW",      {"CW"}),
+    ("SSB",     {"SSB", "USB", "LSB", "AM", "FM"}),
+    ("Digital", {"FT8", "FT4", "FT2", "DATA", "RTTY", "JT65", "JT9",
+                 "PSK31", "PSK63", "WSPR", "JS8", "MSK144", "Q65"}),
+    ("Other",   None),   # None = catch-all for anything not matched above
+]
+
+
+def build_map(my_coords, records, show_arcs: bool):
     from folium.plugins import MarkerCluster
 
     m = folium.Map(
@@ -307,6 +406,11 @@ def build_map(my_coords, records, show_arcs: bool, cluster_by_band: bool = False
     # Mode B (--cluster-by-band): one MarkerCluster per band, each
     #   inside its own FeatureGroup so bands can be toggled individually.
     # ------------------------------------------------------------------
+    # One FeatureGroup + MarkerCluster per mode group.
+    # These are real Leaflet layers — the mode toggle panel calls
+    # .addTo(map) / .remove() on them directly, which is reliable.
+    # The native layer control only shows overlay layers (not these).
+    # ------------------------------------------------------------------
     cluster_icon_fn = """
         function(cluster) {
             var count = cluster.getChildCount();
@@ -323,17 +427,16 @@ def build_map(my_coords, records, show_arcs: bool, cluster_by_band: bool = False
         }
     """
 
-    band_groups   = {}   # band -> FeatureGroup
-    band_clusters = {}   # band -> MarkerCluster  (cluster_by_band mode)
-    shared_fg      = None
-    shared_cluster = None
+    catch_all_label = next((g[0] for g in MODE_GROUPS if g[1] is None), "Other")
+    def _mode_to_group(mode: str) -> str:
+        for label, members in MODE_GROUPS:
+            if members is not None and mode.upper() in members:
+                return label
+        return catch_all_label
 
-    if not cluster_by_band:
-        shared_fg = folium.FeatureGroup(name="Contacts", show=True)
-        shared_cluster = MarkerCluster(
-            icon_create_function=cluster_icon_fn,
-            options={"maxClusterRadius": 40, "disableClusteringAtZoom": 9},
-        ).add_to(shared_fg)
+    mode_fgs      = {}   # group_label -> FeatureGroup
+    mode_clusters = {}   # group_label -> MarkerCluster
+    band_groups   = {}   # band -> None  (for legend tracking only)
 
     skipped = 0
 
@@ -344,41 +447,37 @@ def build_map(my_coords, records, show_arcs: bool, cluster_by_band: bool = False
             continue
 
         band   = r.get('BAND', 'unknown').lower()
-        mode   = r.get('MODE', '')
+        mode   = r.get('MODE', '').upper()
         call   = r.get('CALL', '?')
         date   = r.get('QSO_DATE', '')
         color  = BAND_COLORS.get(band, DEFAULT_COLOR)
         conf   = "✓ confirmed" if is_confirmed(r) else ""
         origin = _resolve_my_coords_for_record(r) or my_coords
+        grp    = _mode_to_group(mode)
         tooltip_text = f"{call} | {band} {mode} | {date} {conf}"
 
-        # Circle marker with a thin white border for legibility
+        if grp not in mode_fgs:
+            fg = folium.FeatureGroup(name=f"Mode: {grp}", show=True)
+            mode_fgs[grp] = fg
+            mode_clusters[grp] = MarkerCluster(
+                icon_create_function=cluster_icon_fn,
+                options={"maxClusterRadius": 40, "disableClusteringAtZoom": 9},
+            ).add_to(fg)
+
+        _dot = _THEME_DEFAULTS.get("contact_dot", {})
         marker = folium.CircleMarker(
             location=coords,
-            radius=6,
-            color="white",        # border colour
-            weight=1.2,           # border width
+            radius=_dot.get("radius", 6),
+            color=_dot.get("border_color", "white"),
+            weight=_dot.get("border_weight", 1.2),
             fill=True,
             fill_color=color,
-            fill_opacity=0.85,
+            fill_opacity=_dot.get("fill_opacity", 0.85),
             tooltip=tooltip_text,
         )
+        marker.add_to(mode_clusters[grp])
+        band_groups[band] = None
 
-        if cluster_by_band:
-            if band not in band_groups:
-                fg = folium.FeatureGroup(name=f"Band: {band}", show=True)
-                band_groups[band] = fg
-                band_clusters[band] = MarkerCluster(
-                    icon_create_function=cluster_icon_fn,
-                    options={"maxClusterRadius": 40, "disableClusteringAtZoom": 9},
-                ).add_to(fg)
-            marker.add_to(band_clusters[band])
-        else:
-            marker.add_to(shared_cluster)
-            # Track bands used (for legend) — reuse band_groups as a set proxy
-            band_groups[band] = band_groups.get(band, None)
-
-        # Great-circle arc — added directly to map (not inside cluster)
         if show_arcs:
             arc_pts = _gc_points(origin, coords)
             folium.PolyLine(
@@ -390,17 +489,28 @@ def build_map(my_coords, records, show_arcs: bool, cluster_by_band: bool = False
                 dash_array="6 4",
             ).add_to(m)
 
-    # Attach all groups to map
-    if cluster_by_band:
-        for fg in band_groups.values():
-            fg.add_to(m)
-    else:
-        shared_fg.add_to(m)
+    for fg in mode_fgs.values():
+        fg.add_to(m)
 
     if skipped:
         print(f"  Note: {skipped} QSO(s) skipped — no usable coordinates found.")
 
-    return m, len(records) - skipped
+    # Return Leaflet JS variable names for the mode FeatureGroups
+    layer_meta = {
+        "bands_present": sorted(band_groups.keys()),
+        "mode_fg_names": {grp: fg.get_name() for grp, fg in mode_fgs.items()},
+        "mode_fg_modes": {},
+    }
+    for r in records:
+        mode = r.get('MODE', '').upper()
+        grp  = _mode_to_group(mode)
+        if grp in layer_meta["mode_fg_names"]:
+            layer_meta["mode_fg_modes"].setdefault(grp, set()).add(mode)
+    layer_meta["mode_fg_modes"] = {
+        g: sorted(s) for g, s in layer_meta["mode_fg_modes"].items()
+    }
+
+    return m, len(records) - skipped, layer_meta
 
 
 # ---------------------------------------------------------------------------
@@ -582,9 +692,12 @@ def build_states_overlay(m, records: list) -> None:
         counts = us_counts if code in us_status else ca_counts
         lookup[code] = {'status': state, 'count': counts.get(code, 0)}
 
-    confirmed_n = sum(1 for s in lookup.values() if s['status'] == 'confirmed')
-    worked_n    = sum(1 for s in lookup.values() if s['status'] == 'worked')
-    print(f"  States overlay: {confirmed_n} confirmed, {worked_n} worked-only entities.")
+    us_conf = sum(1 for c, s in lookup.items() if s['status'] == 'confirmed' and c in us_status)
+    us_work = sum(1 for c, s in lookup.items() if s['status'] == 'worked'    and c in us_status)
+    ca_conf = sum(1 for c, s in lookup.items() if s['status'] == 'confirmed' and c in ca_status)
+    ca_work = sum(1 for c, s in lookup.items() if s['status'] == 'worked'    and c in ca_status)
+    print(f"  States overlay: US {us_conf} confirmed, {us_work} worked | "
+          f"CA {ca_conf} confirmed, {ca_work} worked")
 
     if not lookup and not geojson.get('features'):
         print("  States overlay: no US/CA STATE data found — skipping.")
@@ -593,19 +706,23 @@ def build_states_overlay(m, records: list) -> None:
     def style_fn(feature):
         postal = (feature['properties'].get('postal') or '').upper()
         info   = lookup.get(postal)
+        cfg    = STATES_COLORS
         if not info:
-            # Not worked — faint outline, no fill
             return {
-                'fillColor':   '#ffffff',
-                'color':       '#aaaaaa',
-                'weight':      0.5,
-                'fillOpacity': 0.15,
+                'fillColor':   cfg.get('unworked_fill',   '#ffffff'),
+                'color':       cfg.get('unworked_border', '#666666'),
+                'weight':      cfg.get('unworked_weight', 0.8),
+                'fillOpacity': 0.12,
             }
-        color = colors.get(info['status'], '#888888')
+        status = info['status']
+        fill   = cfg.get(status, '#888888')
+        border = cfg.get(f'border_{status}', fill)
+        w_key = f'weight'  # fallback
+        w     = cfg.get(f'{status}_weight', cfg.get('confirmed_weight', 2.0))
         return {
-            'fillColor':   color,
-            'color':       color,
-            'weight':      1,
+            'fillColor':   fill,
+            'color':       border,
+            'weight':      w,
             'fillOpacity': 0.45,
         }
 
@@ -702,7 +819,7 @@ def build_counties_overlay(m, records: list) -> None:
                 'fillColor':   '#ffffff',
                 'color':       '#888888',
                 'weight':      0.5,
-                'fillOpacity': 0.08,
+                'fillOpacity': COUNTIES_COLORS.get('unworked_opacity', 0.0),
             }
         return {
             'fillColor':   colors.get(info, '#888888'),
@@ -726,9 +843,187 @@ def build_counties_overlay(m, records: list) -> None:
     fg.add_to(m)
 
 
+
 # ---------------------------------------------------------------------------
-# Legend HTML
+# Custom collapsible band / mode toggle panel
 # ---------------------------------------------------------------------------
+
+def inject_toggle_panel(m, filtered_records: list, layer_meta: dict) -> None:
+    """
+    Inject a collapsible Modes filter panel (top-left, starts collapsed).
+    Calls .addTo(map) / .remove() on real Leaflet FeatureGroup objects —
+    same mechanism as the native layer control, so it reliably works.
+    """
+    import json
+
+    map_var       = m.get_name()
+    mode_fg_names = layer_meta.get("mode_fg_names", {})
+    mode_fg_modes = layer_meta.get("mode_fg_modes", {})
+
+    if not mode_fg_names:
+        return
+
+    mode_fg_names_js = json.dumps(mode_fg_names)
+    mode_fg_modes_js = json.dumps(mode_fg_modes)
+    active_groups    = json.dumps(sorted(mode_fg_names.keys()))
+
+    panel_html = f"""
+<style>
+#adif-fp {{
+    position:fixed; top:80px; left:10px; z-index:1000;
+    background:rgba(255,255,255,0.95); border:1px solid #aaa;
+    border-radius:8px; box-shadow:2px 2px 8px rgba(0,0,0,0.25);
+    font-family:sans-serif; font-size:12px;
+    min-width:155px; max-width:210px;
+    user-select:none; cursor:default;
+}}
+#adif-fp .pt {{
+    padding:6px 10px; font-weight:bold; font-size:13px;
+    border-bottom:1px solid #ddd; display:flex;
+    justify-content:space-between; align-items:center;
+    cursor:pointer; color:#333;
+}}
+#adif-fp .sh {{
+    padding:5px 10px 3px; font-weight:bold; color:#555;
+    cursor:pointer; display:flex; justify-content:space-between;
+    align-items:center; border-top:1px solid #eee;
+    font-size:11px; text-transform:uppercase; letter-spacing:0.05em;
+}}
+#adif-fp .sh:hover {{ background:#f5f5f5; }}
+#adif-fp .sb {{ padding:2px 8px 6px 10px; }}
+#adif-fp .tr {{ display:flex; align-items:center; gap:6px; padding:2px 0; }}
+#adif-fp .tr:hover {{ background:#f8f8f8; border-radius:3px; padding:2px 2px; margin:0 -2px; }}
+#adif-fp .chv {{ font-size:10px; color:#999; transition:transform 0.15s; display:inline-block; }}
+#adif-fp .chv.col {{ transform:rotate(-90deg); }}
+#adif-fp .sa {{ font-size:10px; color:#888; cursor:pointer; padding:1px 4px; border-radius:3px; }}
+#adif-fp .sa:hover {{ background:#eee; color:#333; }}
+</style>
+<div id="adif-fp">
+  <div class="pt" id="adif-ptitle">Modes <span id="adif-pchev">▶</span></div>
+  <div id="adif-pbody" style="display:none">
+    <div class="sh" id="adif-mhead">
+      Groups
+      <span>
+        <span class="sa" id="adif-mall">all</span>
+        <span class="sa" id="adif-mnone">none</span>
+        <span id="adif-mchev" class="chv">▼</span>
+      </span>
+    </div>
+    <div class="sb" id="adif-modes-body"></div>
+  </div>
+</div>
+<script>
+setTimeout(function() {{
+    var mapObj       = {map_var};
+    var modeFgNames  = {mode_fg_names_js};
+    var modeFgModes  = {mode_fg_modes_js};
+    var activeGroups = {active_groups};
+
+    function getLayer(n) {{ return window[n] || null; }}
+
+    var activeModes = new Set();
+    activeGroups.forEach(function(g) {{
+        (modeFgModes[g]||[]).forEach(function(m) {{ activeModes.add(m); }});
+    }});
+
+    var modesBody = document.getElementById('adif-modes-body');
+    if (modesBody) {{
+        activeGroups.forEach(function(grp) {{
+            var modes = modeFgModes[grp] || [];
+            var grpRow = document.createElement('div');
+            grpRow.className = 'tr'; grpRow.style.marginTop = '3px';
+            var gcb = document.createElement('input');
+            gcb.type='checkbox'; gcb.id='cb-mgrp-'+grp; gcb.checked=true;
+            gcb.addEventListener('change', function() {{ adifGrpToggle(grp, this.checked); }});
+            var glb = document.createElement('label');
+            glb.htmlFor = 'cb-mgrp-'+grp;
+            glb.textContent = grp + (modes.length===1 ? ' ('+modes[0]+')' : '');
+            glb.style.cssText = 'cursor:pointer;font-weight:bold';
+            grpRow.appendChild(gcb); grpRow.appendChild(glb);
+            modesBody.appendChild(grpRow);
+            if (modes.length > 1) {{
+                modes.forEach(function(mode) {{
+                    var mRow = document.createElement('div');
+                    mRow.className = 'tr'; mRow.style.paddingLeft = '16px';
+                    var mcb = document.createElement('input');
+                    mcb.type='checkbox'; mcb.id='cb-mode-'+mode; mcb.checked=true;
+                    mcb.addEventListener('change', function() {{ adifModeToggle(grp, mode, this.checked); }});
+                    var mlb = document.createElement('label');
+                    mlb.htmlFor='cb-mode-'+mode; mlb.textContent=mode;
+                    mlb.style.cssText='cursor:pointer;color:#555';
+                    mRow.appendChild(mcb); mRow.appendChild(mlb);
+                    modesBody.appendChild(mRow);
+                }});
+            }}
+        }});
+    }}
+
+    window.adifGrpToggle = function(grp, checked) {{
+        var layer = getLayer(modeFgNames[grp]);
+        if (!layer) return;
+        if (checked) {{ if (!mapObj.hasLayer(layer)) layer.addTo(mapObj); }}
+        else         {{ if (mapObj.hasLayer(layer))  layer.remove(); }}
+        (modeFgModes[grp]||[]).forEach(function(m) {{
+            if (checked) activeModes.add(m); else activeModes.delete(m);
+            var cb = document.getElementById('cb-mode-'+m);
+            if (cb) cb.checked = checked;
+        }});
+    }};
+
+    window.adifModeToggle = function(grp, mode, checked) {{
+        if (checked) activeModes.add(mode); else activeModes.delete(mode);
+        var anyOn = (modeFgModes[grp]||[]).some(function(m) {{ return activeModes.has(m); }});
+        var gcb = document.getElementById('cb-mgrp-'+grp);
+        if (gcb) gcb.checked = anyOn;
+        var layer = getLayer(modeFgNames[grp]);
+        if (!layer) return;
+        if (anyOn) {{ if (!mapObj.hasLayer(layer)) layer.addTo(mapObj); }}
+        else       {{ if (mapObj.hasLayer(layer))  layer.remove(); }}
+    }};
+
+    window.adifSelectAll = function(checked) {{
+        activeGroups.forEach(function(grp) {{
+            var gcb = document.getElementById('cb-mgrp-'+grp);
+            if (gcb) gcb.checked = checked;
+            adifGrpToggle(grp, checked);
+        }});
+    }};
+
+    function wireClick(id, fn) {{
+        var el = document.getElementById(id);
+        if (el) el.addEventListener('click', fn);
+    }}
+    wireClick('adif-ptitle', function() {{
+        var body = document.getElementById('adif-pbody');
+        var chev = document.getElementById('adif-pchev');
+        if (!body) return;
+        var h = body.style.display === 'none';
+        body.style.display = h ? '' : 'none';
+        if (chev) chev.textContent = h ? '▼' : '▶';
+    }});
+    wireClick('adif-mhead', function(e) {{
+        if (e.target.classList.contains('sa')) return;
+        var body = document.getElementById('adif-modes-body');
+        var chev = document.getElementById('adif-mchev');
+        if (!body) return;
+        var h = body.style.display === 'none';
+        body.style.display = h ? '' : 'none';
+        if (chev) chev.classList.toggle('col', !h);
+    }});
+    wireClick('adif-mall',  function(e) {{ e.stopPropagation(); adifSelectAll(true);  }});
+    wireClick('adif-mnone', function(e) {{ e.stopPropagation(); adifSelectAll(false); }});
+
+    var fp = document.getElementById('adif-fp');
+    if (fp && window.L) {{
+        L.DomEvent.disableClickPropagation(fp);
+        L.DomEvent.disableScrollPropagation(fp);
+    }}
+}}, 300);
+</script>
+"""
+    m.get_root().html.add_child(folium.Element(panel_html))
+
+
 def add_legend(m, band_groups):
     items = ""
     for band in sorted(band_groups.keys()):
@@ -795,7 +1090,7 @@ def add_overlay_legend(m, overlays: list) -> None:
         '<div style="display:flex;align-items:center;gap:4px;margin:3px 0">' +
         '<span style="display:inline-block;width:12px;height:12px;border-radius:2px;' +
         'background:#fff;border:1px solid #999;margin-right:3px"></span>' +
-        '<span>Not worked</span></div>'
+        '<span>Not worked (outline only)</span></div>'
     )
 
     html = f"""
@@ -826,12 +1121,18 @@ def main():
                         help="End date filter — YYYYMMDD or YYYY-MM-DD (inclusive)")
     parser.add_argument("--confirmed", action="store_true",
                         help="Only show confirmed QSOs (LoTW or QSL received)")
-    parser.add_argument("--no-arcs",   dest="no_arcs", action="store_true",
-                        help="Suppress great-circle arc lines")
+    parser.add_argument("--show-arcs", dest="show_arcs", action="store_true",
+                        help="Draw great-circle arc lines (default: off — slow on large logs)")
     parser.add_argument("--cluster-by-band", dest="cluster_by_band", action="store_true",
                         help="Separate cluster bubble per band, toggleable via layer control (default: all bands together)")
+    parser.add_argument("--show-filters", dest="show_filters", action="store_true",
+                        help="Show in-browser collapsible band/mode filter panel (top-left of map)")
     parser.add_argument("--overlay",
-                        help="Comma-separated overlays: grids, states, counties (e.g. --overlay grids,states,counties)")
+                        help="Comma-separated overlays: grids, states, counties")
+    parser.add_argument("--theme",
+                        help="Color theme YAML file (default: theme_default.yaml beside this script)")
+    parser.add_argument("--verbose",   action="store_true",
+                        help="Detailed console output: all station locations, band breakdown")
     parser.add_argument("--output",    help="Output HTML path (default: map_output.html beside input)")
     args = parser.parse_args()
 
@@ -839,6 +1140,7 @@ def main():
     if not adif_path.exists():
         sys.exit(f"File not found: {adif_path}")
 
+    load_theme(args.theme)
     print(f"Parsing {adif_path.name} ...")
     header, records = parse_adif_with_header(adif_path)
     print(f"  {len(records)} QSO records found.")
@@ -849,29 +1151,59 @@ def main():
             "Could not determine your station coordinates.\n"
             "Ensure MY_LAT/MY_LON or MY_GRIDSQUARE is present in the ADIF header or records."
         )
-    print(f"  Station location: {my_coords[0]:.4f}, {my_coords[1]:.4f}")
+    if args.verbose:
+        # Print all unique operating locations
+        seen_locs = {}
+        for r in records:
+            c = _resolve_my_coords_for_record(r)
+            if c and c not in seen_locs:
+                cs   = (r.get('STATION_CALLSIGN') or r.get('MY_CALL') or '?')
+                grid = r.get('MY_GRIDSQUARE', '')
+                city = r.get('MY_CITY', '')
+                st   = r.get('MY_STATE', '')
+                loc_parts = [cs]
+                if grid: loc_parts.append(grid)
+                if city: loc_parts.append(city)
+                if st:   loc_parts.append(st)
+                loc_parts.append(f"{c[0]:.4f}, {c[1]:.4f}")
+                seen_locs[c] = " | ".join(loc_parts)
+        print(f"  Operating locations ({len(seen_locs)}):")
+        for coords, desc in seen_locs.items():
+            print(f"    {desc}")
+    else:
+        print(f"  Station location: {my_coords[0]:.4f}, {my_coords[1]:.4f}")
 
     filtered = apply_filters(records, args)
     print(f"  {len(filtered)} QSOs after filtering.")
 
-    # Always show mode breakdown — useful feedback for mode-based filtering
     from collections import Counter
     mode_counts = Counter(r.get('MODE', 'unknown').upper() for r in filtered)
-    mode_summary = "  Modes: " + ", ".join(
+    band_counts = Counter(r.get('BAND', 'unknown').lower() for r in filtered)
+
+    # Always show a one-line mode summary
+    mode_line = ", ".join(
         f"{m} ({n})" for m, n in sorted(mode_counts.items(), key=lambda x: -x[1])
     )
-    print(mode_summary)
+    print(f"  Modes: {mode_line}")
+
+    if args.verbose:
+        # Detailed band breakdown
+        band_line = ", ".join(
+            f"{b} ({n})" for b, n in sorted(band_counts.items(), key=lambda x: -x[1])
+        )
+        print(f"  Bands: {band_line}")
 
     if not filtered:
         sys.exit("No contacts to plot after filtering.")
 
     print("Building map ...")
-    m, plotted = build_map(my_coords, filtered, show_arcs=not args.no_arcs,
-                             cluster_by_band=args.cluster_by_band)
-
+    m, plotted, layer_meta = build_map(my_coords, filtered,
+                                       show_arcs=args.show_arcs)
     # Collect band groups that were actually used (for legend)
     used_bands = {r.get('BAND', 'unknown').lower() for r in filtered if resolve_coords(r)}
     add_legend(m, {b: None for b in used_bands})
+    if args.show_filters:
+        inject_toggle_panel(m, filtered, layer_meta)
 
     # Overlays
     overlays = [o.strip().lower() for o in (args.overlay or "").split(",") if o.strip()]

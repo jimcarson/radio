@@ -26,10 +26,12 @@ USE AT YOUR OWN RISK.  These are presented AS IS and without any warranty.
 | `resolve_qrz_discrepancies.py` | Corrects Grid, State, and County discrepancies reported by QRZ's Awards pages as well as allowing bulk correction of your own records. |
 | `adif_extract.py` | Extracts QSOs from a QRZ ADIF export to an inspection CSV; supports date-range and single-date filtering. Produces a ready-to-edit file that feeds directly into `resolve_qrz_discrepancies.py`. |
 | `adif_setup.py` | One-time setup — downloads and caches state/province and county boundary files used by `--overlay states` and `--overlay counties`. Run once before first use. |
-| `adif_map.py` | Plots an ADIF file on a browser-based map. Your activating location(s) are shown. Filter by band, mode, date, or confirmed status. Optional overlays show worked/confirmed grid squares and US states + Canadian provinces. |
+| `adif_map.py` | Plots an ADIF file on a browser-based map. Your activating location(s) are shown. Filter by band, mode, date, or confirmed status. Optional overlays show worked/confirmed grid squares, US states + Canadian provinces, and US counties. In-browser collapsible band/mode toggles. Supports color themes via YAML. |
 | `reconcile_adif.py` | Compares LoTW and QRZ ADIF exports and optionally pushes corrections to QRZ |
 | `sample_corrections.csv` | Annotated sample CSV covering all supported `field` keywords — copy and edit for your own use |
+| `requirements.txt` | Pinned dependency list — `pip install -r requirements.txt` |
 | `sample.cfg` | Sample per-field rules configuration file for `reconcile_adif.py` — copy to `<CALLSIGN>.cfg` and edit |
+| `theme_default.yaml` | Default color theme for `adif_map.py` — copy to customize band/overlay colors |
 | `ne_states.geojson` | Cached US + Canada state/province boundaries written by `adif_setup.py` — not tracked in git, generated on first run |
 | `us_counties.geojson` | Cached US county boundaries written by `adif_setup.py` — not tracked in git, generated on first run |
 
@@ -40,7 +42,9 @@ All files must be in the same directory. `qrz_common.py` is not run directly. `a
 ## Requirements
 
 ```
-pip install pandas openpyxl requests folium pyshp
+pip install -r requirements.txt
+# or individually:
+pip install pandas openpyxl requests folium pyyaml pyshp
 ```
 
 Python 3.10 or later is recommended.  A requirements.txt file with instructions on creating a custom environment is provided.
@@ -588,7 +592,9 @@ This produces `map_output.html` in the same directory as the ADIF file and opens
 --confirmed              Only show confirmed QSOs (LoTW or QRZ)
 --no-arcs                Suppress great-circle arcs
 --cluster-by-band        Separate cluster bubble per band, toggleable via layer control
---overlay <LIST>         Comma-separated overlays: grids, states (e.g. --overlay grids,states)
+--overlay <LIST>         Comma-separated overlays: grids, states, counties
+--theme <FILE>           Color theme YAML file (default: theme_default.yaml)
+--verbose                Detailed console output: all station locations, band breakdown
 --output <file>          Output html file name (default: map_output.html)
 ```
 
