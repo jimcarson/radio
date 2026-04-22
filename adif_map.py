@@ -15,7 +15,8 @@ Usage:
 
 Options:
     --band BAND             Filter by band (e.g. 40m, 20m, 2m)
-    --mode MODE             Filter by mode (e.g. SSB, CW, FT8)
+    --mode MODE             Filter by single mode — e.g. --mode CW (kept for compatibility)
+    --modes LIST            Filter by multiple modes — e.g. --modes CW,SSB,FT8
     --date-from DATE        Filter QSOs on or after date (YYYYMMDD or YYYY-MM-DD)
     --date-to DATE          Filter QSOs on or before date (YYYYMMDD or YYYY-MM-DD)
     --confirmed             Only show confirmed QSOs (LoTW or QSL card received)
@@ -181,16 +182,32 @@ def is_confirmed(record: dict):
     return lotw == 'Y' or qsl == 'Y'
 
 
+def _build_mode_filter(args) -> set:
+    """
+    Build the set of modes to include from --mode and/or --modes.
+    Returns an empty set if no mode filter is active (all modes pass).
+    """
+    modes = set()
+    if getattr(args, 'mode', None):
+        modes.add(args.mode.upper().strip())
+    for m in (getattr(args, 'modes', None) or '').split(','):
+        m = m.strip().upper()
+        if m:
+            modes.add(m)
+    return modes
+
+
 def apply_filters(records, args):
     # Normalise date bounds to YYYYMMDD (accepts YYYYMMDD or YYYY-MM-DD)
-    date_from = parse_qso_datetime(args.date_from)[0] if args.date_from else None
-    date_to   = parse_qso_datetime(args.date_to)[0]   if args.date_to   else None
+    date_from  = parse_qso_datetime(args.date_from)[0] if args.date_from else None
+    date_to    = parse_qso_datetime(args.date_to)[0]   if args.date_to   else None
+    mode_filter = _build_mode_filter(args)
 
     out = []
     for r in records:
         if args.band and r.get('BAND', '').lower() != args.band.lower():
             continue
-        if args.mode and r.get('MODE', '').upper() != args.mode.upper():
+        if mode_filter and r.get('MODE', '').upper() not in mode_filter:
             continue
         date = r.get('QSO_DATE', '')
         if date_from and date < date_from:
@@ -418,10 +435,15 @@ def _classify_contacts(records: list, key_fn) -> dict:
 # Grid square overlay  (pure Python / GeoJSON)
 # ---------------------------------------------------------------------------
 
+# Per-overlay color palettes — each overlay type has its own confirmed/worked pair
+# so multiple overlays on the same map are visually distinguishable.
 OVERLAY_COLORS = {
-    'confirmed': '#2ecc71',   # green
+    'confirmed': '#2ecc71',   # green  (states default / backwards compat)
     'worked':    '#f39c12',   # amber
 }
+STATES_COLORS  = {'confirmed': '#2ecc71', 'worked': '#f39c12'}  # green / amber
+COUNTIES_COLORS = {'confirmed': '#1a8a4a', 'worked': '#c0720a'}  # dark green / burnt amber
+GRIDS_COLORS    = {'confirmed': '#e67e22', 'worked': '#f7dc6f'}  # orange / yellow
 
 def _grid4_polygon(grid4: str) -> list:
     """Return a closed GeoJSON ring for a 4-char Maidenhead grid square."""
@@ -443,9 +465,10 @@ def build_grid_overlay(m, records: list) -> None:
     """
     Add a grid-square choropleth layer to the map.
     Only squares present in records are drawn:
-      green  = at least one confirmed QSO
-      amber  = worked but no confirmed QSO
+      orange = at least one confirmed QSO
+      yellow = worked but no confirmed QSO
     """
+    colors = GRIDS_COLORS
     import json
 
     def grid_key(r):
@@ -478,7 +501,7 @@ def build_grid_overlay(m, records: list) -> None:
     geojson = {'type': 'FeatureCollection', 'features': features}
 
     def style_fn(feature):
-        color = OVERLAY_COLORS.get(feature['properties']['status'], '#888888')
+        color = colors.get(feature['properties']['status'], '#888888')
         return {
             'fillColor':   color,
             'color':       color,
@@ -528,7 +551,9 @@ def build_states_overlay(m, records: list) -> None:
     """
     Add a US states + Canadian provinces choropleth layer.
     Reads ne_states.geojson cached by adif_setup.py.
+    Green = confirmed, amber = worked-unconfirmed.
     """
+    colors = STATES_COLORS
     import json
 
     if not _STATES_CACHE.exists():
@@ -576,7 +601,7 @@ def build_states_overlay(m, records: list) -> None:
                 'weight':      0.5,
                 'fillOpacity': 0.15,
             }
-        color = OVERLAY_COLORS.get(info['status'], '#888888')
+        color = colors.get(info['status'], '#888888')
         return {
             'fillColor':   color,
             'color':       color,
@@ -640,9 +665,10 @@ def build_counties_overlay(m, records: list) -> None:
     """
     Add a US county choropleth layer.
     Reads us_counties.geojson cached by adif_setup.py.
-    Green = confirmed, amber = worked-unconfirmed,
+    Teal = confirmed, light blue = worked-unconfirmed,
     faint gray outline = unworked (boundary visible but no fill).
     """
+    colors = COUNTIES_COLORS
     import json
 
     if not _COUNTIES_CACHE.exists():
@@ -665,22 +691,24 @@ def build_counties_overlay(m, records: list) -> None:
     worked_n    = sum(1 for s in status.values() if s == 'worked')
     print(f"  County overlay: {confirmed_n} confirmed, {worked_n} worked-only counties.")
 
+    # Status-matched border colors (darker shade of each fill)
+    BORDER_COLORS = {'confirmed': '#0d4d28', 'worked': '#7d4e07'}
+
     def style_fn(feature):
         key  = feature['properties'].get('adif_key', '')
         info = status.get(key)
         if not info:
             return {
                 'fillColor':   '#ffffff',
-                'color':       '#bbbbbb',
-                'weight':      0.3,
+                'color':       '#888888',
+                'weight':      0.5,
                 'fillOpacity': 0.08,
             }
-        color = OVERLAY_COLORS.get(info, '#888888')
         return {
-            'fillColor':   color,
-            'color':       color,
-            'weight':      0.8,
-            'fillOpacity': 0.50,
+            'fillColor':   colors.get(info, '#888888'),
+            'color':       BORDER_COLORS.get(info, '#333333'),
+            'weight':      1.2,
+            'fillOpacity': 0.55,
         }
 
     fg = folium.FeatureGroup(name='Overlay: Counties', show=True)
@@ -723,26 +751,56 @@ def add_legend(m, band_groups):
 
 
 def add_overlay_legend(m, overlays: list) -> None:
-    """Add a small overlay status legend (confirmed / worked) when overlays are active."""
+    """
+    Add overlay legend — one row per active overlay type showing its color scheme.
+    Each overlay type uses a distinct color pair so they remain distinguishable
+    when multiple overlays are shown simultaneously.
+    """
     if not overlays:
         return
-    items = (
-        '<div style="display:flex;align-items:center;gap:6px;margin:2px 0">'
-        '<span style="display:inline-block;width:14px;height:14px;'
-        f'background:{OVERLAY_COLORS["confirmed"]};border:1px solid #555;opacity:0.8"></span>'
-        '<span>Confirmed</span></div>'
-        '<div style="display:flex;align-items:center;gap:6px;margin:2px 0">'
-        '<span style="display:inline-block;width:14px;height:14px;'
-        f'background:{OVERLAY_COLORS["worked"]};border:1px solid #555;opacity:0.8"></span>'
-        '<span>Worked (unconfirmed)</span></div>'
-        '<div style="display:flex;align-items:center;gap:6px;margin:2px 0">'
-        '<span style="display:inline-block;width:14px;height:14px;'
-        'background:#ffffff;border:1px solid #999"></span>'
+
+    # (label, confirmed_color, worked_color)
+    OVERLAY_LEGEND_ROWS = {
+        'states':   ('States/Provinces', STATES_COLORS['confirmed'],   STATES_COLORS['worked']),
+        'counties': ('Counties',         COUNTIES_COLORS['confirmed'],  COUNTIES_COLORS['worked']),
+        'grids':    ('Grid Squares',     GRIDS_COLORS['confirmed'],     GRIDS_COLORS['worked']),
+    }
+
+    def swatch(color, border='#555'):
+        return (f'<span style="display:inline-block;width:12px;height:12px;' +
+                f'border-radius:2px;background:{color};border:1px solid {border};' +
+                'opacity:0.85;margin-right:3px"></span>')
+
+    def row(label, c_conf, c_worked):
+        return (
+            f'<div style="display:flex;align-items:center;gap:4px;margin:3px 0">' +
+            swatch(c_conf) + swatch(c_worked) +
+            f'<span style="margin-left:2px">{label}</span></div>'
+        )
+
+    header = (
+        '<div style="display:flex;gap:16px;font-size:11px;color:#666;margin-bottom:4px">' +
+        '<span>' + swatch('#555') + 'Confirmed</span>' +
+        '<span>' + swatch('#aaa') + 'Worked</span>' +
+        '</div>'
+    )
+
+    items = header
+    for key in ['states', 'counties', 'grids']:
+        if key in overlays:
+            label, cc, cw = OVERLAY_LEGEND_ROWS[key]
+            items += row(label, cc, cw)
+
+    items += (
+        '<div style="display:flex;align-items:center;gap:4px;margin:3px 0">' +
+        '<span style="display:inline-block;width:12px;height:12px;border-radius:2px;' +
+        'background:#fff;border:1px solid #999;margin-right:3px"></span>' +
         '<span>Not worked</span></div>'
     )
+
     html = f"""
     <div style="position:fixed;bottom:30px;left:160px;z-index:9999;
-                background:rgba(255,255,255,0.9);padding:10px 14px;
+                background:rgba(255,255,255,0.92);padding:10px 14px;
                 border-radius:8px;border:1px solid #aaa;font-size:13px;
                 font-family:sans-serif;box-shadow:2px 2px 6px rgba(0,0,0,0.3)">
       <b>Overlay</b><br>{items}
@@ -760,7 +818,8 @@ def main():
     )
     parser.add_argument("adif", help="Path to ADIF log file")
     parser.add_argument("--band",      help="Filter by band (e.g. 40m, 20m)")
-    parser.add_argument("--mode",      help="Filter by mode (e.g. SSB, CW, FT8)")
+    parser.add_argument("--mode",      help="Filter by single mode (e.g. SSB, CW, FT8) — kept for compatibility")
+    parser.add_argument("--modes",     help="Filter by multiple modes, comma-separated (e.g. --modes CW,SSB,FT8)")
     parser.add_argument("--date-from", dest="date_from",
                         help="Start date filter — YYYYMMDD or YYYY-MM-DD (inclusive)")
     parser.add_argument("--date-to",   dest="date_to",
@@ -794,6 +853,14 @@ def main():
 
     filtered = apply_filters(records, args)
     print(f"  {len(filtered)} QSOs after filtering.")
+
+    # Always show mode breakdown — useful feedback for mode-based filtering
+    from collections import Counter
+    mode_counts = Counter(r.get('MODE', 'unknown').upper() for r in filtered)
+    mode_summary = "  Modes: " + ", ".join(
+        f"{m} ({n})" for m, n in sorted(mode_counts.items(), key=lambda x: -x[1])
+    )
+    print(mode_summary)
 
     if not filtered:
         sys.exit("No contacts to plot after filtering.")
