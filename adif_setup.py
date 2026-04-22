@@ -2,10 +2,13 @@
 """
 adif_setup.py — One-time setup for adif_map.py boundary data.
 
-Downloads and caches the Natural Earth 50m state/province boundary file
-used by the --overlay states option.  The 50m dataset is required (not 110m)
-because the 110m file omits NT, NU, PE, and YT at that resolution.
-Run this once; re-run only if the cache file is deleted or you want to refresh.
+Downloads and caches boundary files used by adif_map.py overlays:
+
+  ne_states.geojson   — Natural Earth 50m US states + Canadian provinces
+                        (50m required: 110m omits NT, NU, PE, YT)
+  us_counties.geojson — US Census TIGER 20m county boundaries (US only)
+
+Run once; re-run to refresh.
 
 Usage:
     python adif_setup.py
@@ -15,8 +18,9 @@ Output:
                           saved in the same directory as this script.
 
 Dependencies:
-    pip install requests
-    (Already required by qrz_common.py)
+    pip install requests pyshp
+    (requests already required by qrz_common.py;
+     pyshp needed to read Census/Natural Earth shapefile zips)
 """
 
 import json
@@ -24,6 +28,12 @@ import sys
 import zipfile
 import io
 from pathlib import Path
+
+try:
+    import shapefile as pyshp
+    _PYSHP_AVAILABLE = True
+except ImportError:
+    _PYSHP_AVAILABLE = False
 
 try:
     import requests
@@ -35,7 +45,8 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 SCRIPT_DIR  = Path(__file__).parent
-OUTPUT_FILE = SCRIPT_DIR / "ne_states.geojson"
+OUTPUT_FILE         = SCRIPT_DIR / "ne_states.geojson"
+COUNTY_OUTPUT_FILE  = SCRIPT_DIR / "us_counties.geojson"
 
 # Natural Earth admin-1 states/provinces boundary data.
 #
@@ -47,11 +58,11 @@ OUTPUT_FILE = SCRIPT_DIR / "ne_states.geojson"
 # Source order: try each in sequence, stop on first success.
 SOURCES = [
     {
-        "label":    "Natural Earth CDN 50m (zip)",
+        "label":    "Natural Earth CDN 50m (zip/shapefile)",
         "url":      "https://naciscdn.org/naturalearth/50m/cultural/"
                     "ne_50m_admin_1_states_provinces.zip",
-        "format":   "zip",
-        "zip_name": "ne_50m_admin_1_states_provinces.geojson",
+        "format":   "shapefile_zip",
+        "kind":     "states",
     },
     {
         "label":  "GitHub mirror 50m (geojson)",
@@ -61,11 +72,11 @@ SOURCES = [
         "format": "geojson",
     },
     {
-        "label":    "Natural Earth CDN 110m (zip, fallback — missing NT/NU/PE/YT)",
+        "label":    "Natural Earth CDN 110m (zip/shapefile, fallback — missing NT/NU/PE/YT)",
         "url":      "https://naciscdn.org/naturalearth/110m/cultural/"
                     "ne_110m_admin_1_states_provinces.zip",
-        "format":   "zip",
-        "zip_name": "ne_110m_admin_1_states_provinces.geojson",
+        "format":   "shapefile_zip",
+        "kind":     "states",
     },
     {
         "label":  "GitHub mirror 110m (geojson, fallback — missing NT/NU/PE/YT)",
@@ -79,15 +90,101 @@ SOURCES = [
 # Keep only US and Canada
 KEEP_ISO = {"US", "CA"}
 
+# ---------------------------------------------------------------------------
+# County data configuration
+# ---------------------------------------------------------------------------
+
+# US Census TIGER 20m cartographic boundary file (county level).
+# The zip contains a GeoJSON file alongside shapefiles.
+# 20m resolution ≈ 2.5 MB zip — fine for choropleth use.
+COUNTY_SOURCES = [
+    {
+        "label":    "Census TIGER 2023 county 20m (zip)",
+        "url":      "https://www2.census.gov/geo/tiger/GENZ2023/shp/"
+                    "cb_2023_us_county_20m.zip",
+        "format":   "shapefile_zip",
+        "kind":     "counties",
+    },
+    {
+        "label":    "Census TIGER 2022 county 20m (zip, fallback)",
+        "url":      "https://www2.census.gov/geo/tiger/GENZ2022/shp/"
+                    "cb_2022_us_county_20m.zip",
+        "format":   "shapefile_zip",
+        "kind":     "counties",
+    },
+    {
+        "label":    "Census TIGER 2021 county 20m (zip, fallback)",
+        "url":      "https://www2.census.gov/geo/tiger/GENZ2021/shp/"
+                    "cb_2021_us_county_20m.zip",
+        "format":   "shapefile_zip",
+        "kind":     "counties",
+    },
+]
+
+# State FIPS code -> 2-letter postal abbreviation.
+# Used to convert TIGER's STATEFP property to the state code stored in
+# the ADIF CNTY field (e.g. STATEFP="53" + NAME="King" -> "WA,King").
+FIPS_TO_ABBR: dict[str, str] = {
+    "01":"AL","02":"AK","04":"AZ","05":"AR","06":"CA","08":"CO","09":"CT",
+    "10":"DE","11":"DC","12":"FL","13":"GA","15":"HI","16":"ID","17":"IL",
+    "18":"IN","19":"IA","20":"KS","21":"KY","22":"LA","23":"ME","24":"MD",
+    "25":"MA","26":"MI","27":"MN","28":"MS","29":"MO","30":"MT","31":"NE",
+    "32":"NV","33":"NH","34":"NJ","35":"NM","36":"NY","37":"NC","38":"ND",
+    "39":"OH","40":"OK","41":"OR","42":"PA","44":"RI","45":"SC","46":"SD",
+    "47":"TN","48":"TX","49":"UT","50":"VT","51":"VA","53":"WA","54":"WV",
+    "55":"WI","56":"WY",
+}
+
 
 # ---------------------------------------------------------------------------
 # Download
 # ---------------------------------------------------------------------------
 
+def _shapefile_zip_to_raw_geojson(zip_bytes: bytes) -> dict:
+    """
+    Read a shapefile from a zip (in memory) and return a raw GeoJSON
+    FeatureCollection with all original properties preserved.
+    Requires pyshp.
+    """
+    if not _PYSHP_AVAILABLE:
+        raise RuntimeError(
+            "pyshp is required to read shapefile zips.\n"
+            "  pip install pyshp"
+        )
+    zf   = zipfile.ZipFile(io.BytesIO(zip_bytes))
+    names = zf.namelist()
+    shp_name = next((n for n in names if n.endswith(".shp")), None)
+    if not shp_name:
+        raise ValueError(f"No .shp file found in zip. Contents: {names}")
+    stem = shp_name[:-4]
+
+    shp = io.BytesIO(zf.read(f"{stem}.shp"))
+    dbf = io.BytesIO(zf.read(f"{stem}.dbf"))
+    shx = io.BytesIO(zf.read(f"{stem}.shx")) if f"{stem}.shx" in names else None
+
+    reader = pyshp.Reader(shp=shp, dbf=dbf, shx=shx)
+    features = []
+    for rec in reader.iterShapeRecords():
+        props = dict(rec.record.as_dict())
+        geom  = rec.shape.__geo_interface__
+        features.append({
+            "type":       "Feature",
+            "properties": props,
+            "geometry":   geom,
+        })
+    print(f"    Read {len(features)} features from shapefile.")
+    return {"type": "FeatureCollection", "features": features}
+
+
 def download(source: dict) -> dict | None:
     """
     Download and parse a GeoJSON FeatureCollection from a source dict.
-    Returns the parsed dict or None on failure.
+
+    Supported formats:
+        "geojson"        — response body is GeoJSON directly
+        "shapefile_zip"  — zip contains .shp/.dbf/.shx (Census TIGER / NE CDN)
+
+    Returns the parsed FeatureCollection dict, or None on failure.
     """
     label = source["label"]
     url   = source["url"]
@@ -97,7 +194,7 @@ def download(source: dict) -> dict | None:
     print(f"    {url}")
 
     try:
-        r = requests.get(url, timeout=60,
+        r = requests.get(url, timeout=120,
                          headers={"User-Agent": "adif_setup/1.0"})
         r.raise_for_status()
     except requests.RequestException as exc:
@@ -107,28 +204,13 @@ def download(source: dict) -> dict | None:
     print(f"    Downloaded {len(r.content):,} bytes")
 
     try:
-        if fmt == "zip":
-            zf = zipfile.ZipFile(io.BytesIO(r.content))
-            target = source.get("zip_name", "")
-            names  = zf.namelist()
-            # Find the geojson member (name may vary by version)
-            match = next(
-                (n for n in names
-                 if n.endswith(".geojson") and "admin_1" in n),
-                None
-            )
-            if not match and target:
-                match = next((n for n in names if target in n), None)
-            if not match:
-                # Try any geojson in the zip
-                match = next((n for n in names if n.endswith(".geojson")), None)
-            if not match:
-                print(f"    FAILED: no .geojson found in zip. Contents: {names[:10]}")
-                return None
-            print(f"    Reading {match} from zip ...")
-            data = json.loads(zf.read(match))
-        else:
+        if fmt == "geojson":
             data = r.json()
+        elif fmt == "shapefile_zip":
+            data = _shapefile_zip_to_raw_geojson(r.content)
+        else:
+            print(f"    FAILED: unknown format {fmt!r}")
+            return None
     except Exception as exc:
         print(f"    FAILED to parse: {exc}")
         return None
@@ -203,20 +285,60 @@ def normalise(data: dict) -> dict:
     return {"type": "FeatureCollection", "features": features_out}
 
 
+def normalise_counties(data: dict) -> dict:
+    """
+    Normalise Census TIGER county GeoJSON into a consistent schema.
+
+    Normalised properties on each feature:
+        adif_key  — ADIF CNTY match key, e.g. "WA,King"
+        state     — 2-letter state abbreviation, e.g. "WA"
+        name      — county name without suffix, e.g. "King"
+        namelsad  — full name with suffix, e.g. "King County"
+
+    Features whose STATEFP is not in FIPS_TO_ABBR (e.g. PR, VI) are dropped.
+    """
+    features_in  = data.get("features", [])
+    features_out = []
+
+    for f in features_in:
+        props   = f.get("properties") or {}
+        statefp = str(props.get("STATEFP") or props.get("statefp") or "").zfill(2)
+        abbr    = FIPS_TO_ABBR.get(statefp)
+        if not abbr:
+            continue   # skip territories, PR, VI
+
+        name    = (props.get("NAME") or props.get("name") or "").strip()
+        namelsad= (props.get("NAMELSAD") or props.get("namelsad")
+                   or f"{name} County").strip()
+        adif_key = f"{abbr},{name}"
+
+        features_out.append({
+            "type": "Feature",
+            "properties": {
+                "adif_key": adif_key,
+                "state":    abbr,
+                "name":     name,
+                "namelsad": namelsad,
+            },
+            "geometry": f["geometry"],
+        })
+
+    return {"type": "FeatureCollection", "features": features_out}
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
-def main():
-    print("adif_setup.py — downloading boundary data for adif_map.py")
-    print()
-
+def _run_states() -> bool:
+    """Download and save ne_states.geojson. Returns True on success."""
+    print("── States / Provinces ──────────────────────────────────────")
     if OUTPUT_FILE.exists():
-        print(f"Cache file already exists: {OUTPUT_FILE}")
-        answer = input("Re-download and overwrite? [y/N] ").strip().lower()
+        print(f"  Cache file already exists: {OUTPUT_FILE}")
+        answer = input("  Re-download and overwrite? [y/N] ").strip().lower()
         if answer != "y":
-            print("Nothing to do.")
-            return
+            print("  Skipped.")
+            return True
 
     raw = None
     for source in SOURCES:
@@ -227,59 +349,94 @@ def main():
 
     if raw is None:
         print()
-        print("ERROR: All download sources failed.")
-        print("Check your internet connection and try again.")
-        sys.exit(1)
+        print("  ERROR: All states download sources failed.")
+        return False
 
-    total_in = len(raw["features"])
     normalised = normalise(raw)
-    total_out  = len(normalised["features"])
-
-    us_count = sum(1 for f in normalised["features"]
-                   if f["properties"]["iso_a2"] == "US")
-    ca_count = sum(1 for f in normalised["features"]
-                   if f["properties"]["iso_a2"] == "CA")
+    us_count = sum(1 for f in normalised["features"] if f["properties"]["iso_a2"] == "US")
+    ca_count = sum(1 for f in normalised["features"] if f["properties"]["iso_a2"] == "CA")
 
     print()
-    print(f"  Total features in source:  {total_in}")
-    print(f"  After filtering to US+CA:  {total_out}")
-    print(f"    US states/DC:            {us_count}")
-    print(f"    CA provinces/territories:{ca_count}")
+    print(f"  Total features: {len(normalised['features'])}  "
+          f"(US: {us_count}, CA: {ca_count})")
 
-    # Spot-check that all expected postal codes are present.
-    # The four CA entities below are absent from the 110m dataset — their
-    # presence confirms we got the 50m file.
-    postals = {f["properties"]["postal"] for f in normalised["features"]}
-
-    ca_required = {"AB", "BC", "MB", "NB", "NL", "NS",
-                   "NT", "NU", "ON", "PE", "QC", "SK", "YT"}
-    us_sample   = {"WA", "TX", "FL", "NY", "CA"}
+    # Spot-check CA coverage — 4 provinces absent from 110m fallback
+    postals     = {f["properties"]["postal"] for f in normalised["features"]}
+    ca_required = {"AB","BC","MB","NB","NL","NS","NT","NU","ON","PE","QC","SK","YT"}
     ca_missing  = ca_required - postals
-    us_missing  = us_sample   - postals
 
     if ca_missing:
         print(f"  WARNING: missing CA provinces/territories: {ca_missing}")
-        if {"NT", "NU", "PE", "YT"} & ca_missing:
+        if {"NT","NU","PE","YT"} & ca_missing:
             print("  This usually means the 110m fallback was used instead of 50m.")
-            print("  NT (Northwest Territories), NU (Nunavut), PE (Prince Edward")
-            print("  Island), and YT (Yukon) are omitted from the 110m dataset.")
-            print("  These entities will not appear in the --overlay states layer.")
-    elif us_missing:
-        print(f"  WARNING: missing US states: {us_missing}")
+            print("  NT/NU/PE/YT are omitted from the 110m dataset.")
     else:
-        all_ca = sorted(postals & ca_required)
-        print(f"  All 13 CA provinces/territories present: {', '.join(all_ca)}")
-        print(f"  Spot-check US states: OK")
+        print(f"  All 13 CA provinces/territories confirmed present.")
 
-    OUTPUT_FILE.write_text(
-        json.dumps(normalised, separators=(",", ":")),
-        encoding="utf-8"
-    )
-    size_kb = OUTPUT_FILE.stat().st_size // 1024
+    OUTPUT_FILE.write_text(json.dumps(normalised, separators=(",", ":")),
+                           encoding="utf-8")
+    print(f"  Saved: {OUTPUT_FILE}  ({OUTPUT_FILE.stat().st_size // 1024} KB)")
+    return True
+
+
+def _run_counties() -> bool:
+    """Download and save us_counties.geojson. Returns True on success."""
+    print("── US Counties ─────────────────────────────────────────────")
+    if COUNTY_OUTPUT_FILE.exists():
+        print(f"  Cache file already exists: {COUNTY_OUTPUT_FILE}")
+        answer = input("  Re-download and overwrite? [y/N] ").strip().lower()
+        if answer != "y":
+            print("  Skipped.")
+            return True
+
+    raw = None
+    for source in COUNTY_SOURCES:
+        raw = download(source)
+        if raw:
+            break
+        print()
+
+    if raw is None:
+        print()
+        print("  ERROR: All county download sources failed.")
+        return False
+
+    normalised = normalise_counties(raw)
+    total = len(normalised["features"])
+
+    # Spot-check
+    keys   = {f["properties"]["adif_key"] for f in normalised["features"]}
+    sample = {"WA,King", "TX,Travis", "NY,New York", "FL,Miami-Dade"}
+    missing = sample - keys
+    if missing:
+        print(f"  WARNING: expected counties not found: {missing}")
+    else:
+        print(f"  {total} counties loaded. Spot-check OK.")
+
+    COUNTY_OUTPUT_FILE.write_text(json.dumps(normalised, separators=(",", ":")),
+                                  encoding="utf-8")
+    print(f"  Saved: {COUNTY_OUTPUT_FILE}  "
+          f"({COUNTY_OUTPUT_FILE.stat().st_size // 1024} KB)")
+    return True
+
+
+def main():
+    print("adif_setup.py — downloading boundary data for adif_map.py")
     print()
-    print(f"Saved: {OUTPUT_FILE}  ({size_kb} KB)")
+
+    states_ok  = _run_states()
     print()
-    print("Setup complete. You can now use --overlay states in adif_map.py.")
+    counties_ok = _run_counties()
+    print()
+
+    if states_ok and counties_ok:
+        print("Setup complete. You can now use --overlay states,counties,grids in adif_map.py.")
+    else:
+        if not states_ok:
+            print("WARNING: states download failed — --overlay states will not work.")
+        if not counties_ok:
+            print("WARNING: counties download failed — --overlay counties will not work.")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

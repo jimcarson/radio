@@ -25,12 +25,13 @@ USE AT YOUR OWN RISK.  These are presented AS IS and without any warranty.
 | `qrz_common.py` | Shared library — ADIF parsing, QRZ API client, field converters, Maidenhead grid utilities, config loading |
 | `resolve_qrz_discrepancies.py` | Corrects Grid, State, and County discrepancies reported by QRZ's Awards pages as well as allowing bulk correction of your own records. |
 | `adif_extract.py` | Extracts QSOs from a QRZ ADIF export to an inspection CSV; supports date-range and single-date filtering. Produces a ready-to-edit file that feeds directly into `resolve_qrz_discrepancies.py`. |
-| `adif_setup.py` | One-time setup — downloads and caches the state/province boundary file used by `--overlay states`. Run once before first use. |
+| `adif_setup.py` | One-time setup — downloads and caches state/province and county boundary files used by `--overlay states` and `--overlay counties`. Run once before first use. |
 | `adif_map.py` | Plots an ADIF file on a browser-based map. Your activating location(s) are shown. Filter by band, mode, date, or confirmed status. Optional overlays show worked/confirmed grid squares and US states + Canadian provinces. |
 | `reconcile_adif.py` | Compares LoTW and QRZ ADIF exports and optionally pushes corrections to QRZ |
 | `sample_corrections.csv` | Annotated sample CSV covering all supported `field` keywords — copy and edit for your own use |
 | `sample.cfg` | Sample per-field rules configuration file for `reconcile_adif.py` — copy to `<CALLSIGN>.cfg` and edit |
-| `ne_states.geojson` | Cached US + Canada boundary file written by `adif_setup.py` — not tracked in git, generated on first run |
+| `ne_states.geojson` | Cached US + Canada state/province boundaries written by `adif_setup.py` — not tracked in git, generated on first run |
+| `us_counties.geojson` | Cached US county boundaries written by `adif_setup.py` — not tracked in git, generated on first run |
 
 All files must be in the same directory. `qrz_common.py` is not run directly. `adif_map.py` imports from `qrz_common.py` for ADIF parsing, grid conversion, and date normalisation. `adif_setup.py` is run once to cache boundary data for the states overlay.
 
@@ -39,7 +40,7 @@ All files must be in the same directory. `qrz_common.py` is not run directly. `a
 ## Requirements
 
 ```
-pip install pandas openpyxl requests folium
+pip install pandas openpyxl requests folium pyshp
 ```
 
 Python 3.10 or later is recommended.  A requirements.txt file with instructions on creating a custom environment is provided.
@@ -545,13 +546,21 @@ python adif_map.py mylog.adi --overlay states
 # Both at once
 python adif_map.py mylog.adi --overlay grids,states
 
+# Counties only
+python adif_map.py mylog.adi --overlay counties
+
+# All three at once — renders states → counties → grids (grids on top)
+python adif_map.py mylog.adi --overlay states,counties,grids
+
 # Combine with filters — overlay reflects only the filtered set
-python adif_map.py mylog.adi --band 20m --confirmed --overlay grids,states
+python adif_map.py mylog.adi --band 20m --confirmed --overlay grids,states,counties
 ```
 
 **Grid squares** are generated entirely in Python from the `GRIDSQUARE` field (4-character precision, e.g. FN31). Only squares that appear in your filtered log are drawn — no external data file required.
 
 **States and provinces** (US + Canada) are read from `ne_states.geojson`, a cached boundary file downloaded by `adif_setup.py`. Run that script once before first use. The overlay reads the `STATE` field and `DXCC` code from each QSO record (`DXCC=291` for US, `DXCC=1` for Canada).
+
+**Counties** (US only) are read from `us_counties.geojson`, also downloaded by `adif_setup.py`. The overlay reads the `CNTY` field (e.g. `WA,King`) and matches it against Census TIGER boundaries. County, Parish, Borough, and Census Area suffixes are stripped automatically before matching.
 
 Both overlays are independently toggleable in the map's layer control.
 

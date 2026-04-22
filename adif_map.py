@@ -21,7 +21,7 @@ Options:
     --confirmed             Only show confirmed QSOs (LoTW or QSL card received)
     --no-arcs               Suppress great-circle arc lines
     --cluster-by-band       Separate cluster bubble per band (default: all bands together)
-    --overlay LIST          Comma-separated overlays: grids,states (e.g. --overlay grids,states)
+    --overlay LIST          Comma-separated overlays: grids,states,counties
     --output FILE           Output HTML filename (default: map_output.html next to input file)
 """
 
@@ -234,27 +234,50 @@ def build_map(my_coords, records, show_arcs: bool, cluster_by_band: bool = False
     ).add_to(m)
 
     # Operating location markers — one per unique MY_ position
-    seen_origins = {}   # coords -> (callsign, grid) for dedup
+    seen_origins = {}   # coords -> info dict for dedup
+    MY_DISPLAY_FIELDS = [
+        'MY_GRIDSQUARE', 'MY_CITY', 'MY_STATE', 'MY_CNTY',
+        'MY_COUNTRY', 'MY_CQ_ZONE', 'MY_ITU_ZONE', 'MY_NAME',
+    ]
     for r in records:
         origin = _resolve_my_coords_for_record(r)
         if origin is None or origin in seen_origins:
             continue
-        callsign = r.get('STATION_CALLSIGN') or r.get('MY_CALL') or r.get('OPERATOR') or '?'
-        grid     = r.get('MY_GRIDSQUARE', '')
-        seen_origins[origin] = (callsign, grid)
+        callsign = (r.get('STATION_CALLSIGN') or r.get('MY_CALL')
+                    or r.get('OPERATOR') or '?')
+        info = {'callsign': callsign}
+        for f in MY_DISPLAY_FIELDS:
+            v = r.get(f, '').strip()
+            if v:
+                info[f] = v
+        seen_origins[origin] = info
 
     # Fallback: if no per-record origins found, use the map-centre coords
     if not seen_origins:
-        seen_origins[my_coords] = ('My Station', '')
+        seen_origins[my_coords] = {'callsign': 'My Station'}
 
-    for origin, (callsign, grid) in seen_origins.items():
-        tip = callsign
-        if grid:
-            tip += f" | {grid}"
-        tip += f" | {origin[0]:.4f}, {origin[1]:.4f}"
+    for origin, info in seen_origins.items():
+        callsign = info.get('callsign', '?')
+        parts = [callsign]
+        # Ordered MY_ fields to display if populated
+        display_fields = [
+            ('MY_GRIDSQUARE', None),
+            ('MY_CITY',       None),
+            ('MY_STATE',      None),
+            ('MY_CNTY',       None),
+            ('MY_COUNTRY',    None),
+            ('MY_CQ_ZONE',    'CQ'),
+            ('MY_ITU_ZONE',   'ITU'),
+            ('MY_NAME',       None),
+        ]
+        for field, label in display_fields:
+            val = info.get(field, '').strip()
+            if val:
+                parts.append(f"{label}: {val}" if label else val)
+        parts.append(f"{origin[0]:.4f}, {origin[1]:.4f}")
         folium.Marker(
             location=origin,
-            tooltip=tip,
+            tooltip=" | ".join(parts),
             icon=folium.Icon(color="red", icon="home", prefix="fa"),
         ).add_to(m)
 
@@ -588,6 +611,93 @@ def build_states_overlay(m, records: list) -> None:
     fg.add_to(m)
 
 
+
+# ---------------------------------------------------------------------------
+# County overlay  (reads cached us_counties.geojson)
+# ---------------------------------------------------------------------------
+
+_COUNTIES_CACHE = Path(__file__).parent / "us_counties.geojson"
+
+
+def _cnty_key(r: dict) -> str:
+    """
+    Extract normalised ADIF CNTY key from a QSO record.
+    ADIF stores county as "ST,Name" (e.g. "WA,King").
+    Returns empty string if field is absent or not a US contact.
+    """
+    cnty = r.get('CNTY', '').strip()
+    if not cnty or ',' not in cnty:
+        return ''
+    # Normalise: strip County/Borough/Parish suffix that sometimes creeps in
+    state, name = cnty.split(',', 1)
+    import re as _re
+    name = _re.sub(r'\s+(County|Parish|Borough|Census Area|Municipality)\s*$',
+                   '', name.strip(), flags=_re.IGNORECASE).strip()
+    return f"{state.upper()},{name}"
+
+
+def build_counties_overlay(m, records: list) -> None:
+    """
+    Add a US county choropleth layer.
+    Reads us_counties.geojson cached by adif_setup.py.
+    Green = confirmed, amber = worked-unconfirmed,
+    faint gray outline = unworked (boundary visible but no fill).
+    """
+    import json
+
+    if not _COUNTIES_CACHE.exists():
+        print(
+            "  County overlay: us_counties.geojson not found.\n"
+            "  Run  python adif_setup.py  to download boundary data."
+        )
+        return
+
+    try:
+        geojson = json.loads(_COUNTIES_CACHE.read_text(encoding="utf-8"))
+    except Exception as exc:
+        print(f"  County overlay: could not read {_COUNTIES_CACHE.name}: {exc}")
+        return
+
+    status, counts = _classify_contacts(records, _cnty_key)
+    status.pop('', None);  counts.pop('', None)
+
+    confirmed_n = sum(1 for s in status.values() if s == 'confirmed')
+    worked_n    = sum(1 for s in status.values() if s == 'worked')
+    print(f"  County overlay: {confirmed_n} confirmed, {worked_n} worked-only counties.")
+
+    def style_fn(feature):
+        key  = feature['properties'].get('adif_key', '')
+        info = status.get(key)
+        if not info:
+            return {
+                'fillColor':   '#ffffff',
+                'color':       '#bbbbbb',
+                'weight':      0.3,
+                'fillOpacity': 0.08,
+            }
+        color = OVERLAY_COLORS.get(info, '#888888')
+        return {
+            'fillColor':   color,
+            'color':       color,
+            'weight':      0.8,
+            'fillOpacity': 0.50,
+        }
+
+    fg = folium.FeatureGroup(name='Overlay: Counties', show=True)
+
+    folium.GeoJson(
+        geojson,
+        style_function=style_fn,
+        tooltip=folium.GeoJsonTooltip(
+            fields=['namelsad', 'state', 'adif_key'],
+            aliases=['County', 'State', 'ADIF key'],
+            localize=True,
+        ),
+    ).add_to(fg)
+
+    fg.add_to(m)
+
+
 # ---------------------------------------------------------------------------
 # Legend HTML
 # ---------------------------------------------------------------------------
@@ -662,7 +772,7 @@ def main():
     parser.add_argument("--cluster-by-band", dest="cluster_by_band", action="store_true",
                         help="Separate cluster bubble per band, toggleable via layer control (default: all bands together)")
     parser.add_argument("--overlay",
-                        help="Comma-separated overlays to add: grids, states (e.g. --overlay grids,states)")
+                        help="Comma-separated overlays: grids, states, counties (e.g. --overlay grids,states,counties)")
     parser.add_argument("--output",    help="Output HTML path (default: map_output.html beside input)")
     args = parser.parse_args()
 
@@ -698,12 +808,15 @@ def main():
 
     # Overlays
     overlays = [o.strip().lower() for o in (args.overlay or "").split(",") if o.strip()]
-    if "grids" in overlays:
-        print("Building grid square overlay ...")
-        build_grid_overlay(m, filtered)
     if "states" in overlays:
         print("Building states/provinces overlay ...")
         build_states_overlay(m, filtered)
+    if "counties" in overlays:
+        print("Building county overlay ...")
+        build_counties_overlay(m, filtered)
+    if "grids" in overlays:
+        print("Building grid square overlay ...")
+        build_grid_overlay(m, filtered)
     if overlays:
         add_overlay_legend(m, overlays)
 
