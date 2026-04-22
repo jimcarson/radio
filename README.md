@@ -35,7 +35,7 @@ USE AT YOUR OWN RISK.  These are presented AS IS and without any warranty.
 | `ne_states.geojson` | Cached US + Canada state/province boundaries written by `adif_setup.py` — not tracked in git, generated on first run |
 | `us_counties.geojson` | Cached US county boundaries written by `adif_setup.py` — not tracked in git, generated on first run |
 
-All files must be in the same directory. `qrz_common.py` is not run directly. `adif_map.py` imports from `qrz_common.py` for ADIF parsing, grid conversion, and date normalisation. `adif_setup.py` is run once to cache boundary data for the states overlay.
+All files must be in the same directory. `qrz_common.py` is not run directly. `adif_map.py` imports from `qrz_common.py` for ADIF parsing, grid conversion, and date normalisation. `adif_setup.py` is run once to download boundary files for `--overlay states` and `--overlay counties`. It downloads from Natural Earth (states) and the US Census Bureau (counties), both as shapefiles read via `pyshp`.
 
 ---
 
@@ -49,7 +49,7 @@ pip install pandas openpyxl requests folium pyyaml pyshp
 
 Python 3.10 or later is recommended.  A requirements.txt file with instructions on creating a custom environment is provided.
 
-There are only four non-standard libraries used and versions very conservative, e.g., Currently pandas 3.x is shipping, but we only require at least 1.5.
+Library versions are intentionally conservative — for example, pandas 3.x is current but we only require 1.5+. The full list is in `requirements.txt`.
 
 ---
 
@@ -91,8 +91,7 @@ It can also be used to bulk update your own records.
 
 **1. Export from QRZ**
 
-- **ADIF export:** Logbook → Settings → Export.   Wait.  Click Settings again to refresh.  Save the `.adi` file.
-- **Discrepancy report:** Logbook → Awards → United States Counties Award → Details → Export. Save as Excel (`.xlsx`).
+- **ADIF export:** Logbook → Settings → Export. Wait, then click Settings again to refresh. Save the `.adi` file.
 
 **2. Export discrepancy reports from QRZ Awards**
 
@@ -524,55 +523,17 @@ Contains only records with at least one `corrected` field change. Can be importe
 
 ---
 
-## `adif_map.py` 
+## `adif_map.py`
 
-Plots an ADIF file on a map in your browser (in a local file).  
+Plots an ADIF file on an interactive map in your browser. Your activating location(s) are shown — including multiple sites for portable operations like POTA. Contacts are clustered by zoom level and colored by band.
 
-> **Important:** You probably want to use adif_extract.py to pull a subset.  I've tested it with 35k contacts, and it's pretty slow to process, but did work.  
-
-### Overlays
-
-The `--overlay` flag adds choropleth layers showing which grid squares or states/provinces you've worked, colour-coded by confirmation status:
-
-| Colour | Meaning |
-|---|---|
-| Green | At least one confirmed QSO (LoTW or QSL received) |
-| Amber | Worked but no confirmed QSO |
-| White (no polygon) | Not worked under the current filter |
-
-```bash
-# Grid squares only
-python adif_map.py mylog.adi --overlay grids
-
-# States and provinces only
-python adif_map.py mylog.adi --overlay states
-
-# Both at once
-python adif_map.py mylog.adi --overlay grids,states
-
-# Counties only
-python adif_map.py mylog.adi --overlay counties
-
-# All three at once — renders states → counties → grids (grids on top)
-python adif_map.py mylog.adi --overlay states,counties,grids
-
-# Combine with filters — overlay reflects only the filtered set
-python adif_map.py mylog.adi --band 20m --confirmed --overlay grids,states,counties
-```
-
-**Grid squares** are generated entirely in Python from the `GRIDSQUARE` field (4-character precision, e.g. FN31). Only squares that appear in your filtered log are drawn — no external data file required.
-
-**States and provinces** (US + Canada) are read from `ne_states.geojson`, a cached boundary file downloaded by `adif_setup.py`. Run that script once before first use. The overlay reads the `STATE` field and `DXCC` code from each QSO record (`DXCC=291` for US, `DXCC=1` for Canada).
-
-**Counties** (US only) are read from `us_counties.geojson`, also downloaded by `adif_setup.py`. The overlay reads the `CNTY` field (e.g. `WA,King`) and matches it against Census TIGER boundaries. County, Parish, Borough, and Census Area suffixes are stripped automatically before matching.
-
-Both overlays are independently toggleable in the map's layer control.
+> **Performance note:** The map works on a full log (tested at 35k contacts) but opening the HTML file is noticeably slow above ~5,000 QSOs. Use `adif_extract.py` to pull a date range or specific callsign before mapping if you only need a subset.
 
 ### Quick Start
 
 **1. Get your ADIF file**
 
-Any ADIF file will work — a QRZ export, a LoTW download, or the output of `adif_extract.py`. The map reads `MY_LAT`/`MY_LON` or `MY_GRIDSQUARE` per record to determine your transmit location, so portable operations with multiple operating sites are handled automatically.
+Any ADIF file works — a QRZ export, a LoTW download, or the output of `adif_extract.py`. The map reads `MY_LAT`/`MY_LON` or `MY_GRIDSQUARE` per record to determine your transmit location, so multiple operating sites are handled automatically.
 
 **2. Plot contacts**
 
@@ -585,24 +546,96 @@ This produces `map_output.html` in the same directory as the ADIF file and opens
 ### All Options
 
 ```
---band <BAND>            Filter by band (e.g., 40M, 20m)
---mode <MODE>            Filter by mode (e.g., SSB, CW, FT8)
+--band <BAND>            Filter by band (e.g. 40m, 20m) — single band
+--mode <MODE>            Filter by single mode (e.g. CW) — kept for compatibility
+--modes <LIST>           Filter by multiple modes, comma-separated (e.g. --modes CW,FT8)
 --date-from <DATE>       Filter QSOs on or after date (YYYYMMDD or YYYY-MM-DD)
 --date-to <DATE>         Filter QSOs on or before date (YYYYMMDD or YYYY-MM-DD)
---confirmed              Only show confirmed QSOs (LoTW or QRZ)
---no-arcs                Suppress great-circle arcs
---cluster-by-band        Separate cluster bubble per band, toggleable via layer control
+--confirmed              Only show confirmed QSOs (LoTW or QSL received)
+--show-arcs              Draw great-circle arc lines (default: off — slow on large logs)
 --overlay <LIST>         Comma-separated overlays: grids, states, counties
+--show-mode-filters      Show collapsible in-browser filter panel (see Filters section)
 --theme <FILE>           Color theme YAML file (default: theme_default.yaml)
---verbose                Detailed console output: all station locations, band breakdown
---output <file>          Output html file name (default: map_output.html)
+--verbose                Detailed console output: all operating locations, band breakdown
+--output <FILE>          Output HTML filename (default: map_output.html beside input)
 ```
 
-The map will look at each QSO for your location, then plot those on a map.  For example, during a trip around Iceland, I activated 11 parks.  Arcs project from each to the other station.
+### Overlays
+
+The `--overlay` flag adds choropleth layers showing which entities you have worked and confirmed. Each overlay type uses a distinct color palette so multiple overlays are visually distinguishable:
+
+| Overlay | Confirmed | Worked (unconfirmed) | Not worked |
+|---|---|---|---|
+| States / Provinces | Green `#2ecc71` | Amber `#f39c12` | Outline only |
+| Counties | Dark green `#1a8a4a` | Burnt amber `#c0720a` | Outline only |
+| Grid squares | Orange `#e67e22` | Yellow `#f7dc6f` | Not drawn |
+
+Colors are configurable in `theme_default.yaml`. Border weights, fill opacity, and unworked border colors are also themeable.
+
+```bash
+# States and counties together (states as base layer, counties on top)
+python adif_map.py mylog.adi --overlay states,counties
+
+# All three — renders states → counties → grids (grids on top)
+python adif_map.py mylog.adi --overlay states,counties,grids
+
+# Combine with CLI filters
+python adif_map.py mylog.adi --modes CW --confirmed --overlay states,counties
+```
+
+**Grid squares** are generated from the `GRIDSQUARE` field (4-character precision, e.g. FN31) — no external file required. Only squares present in your filtered log are drawn.
+
+**States and provinces** (US + Canada) are read from `ne_states.geojson`, downloaded by `adif_setup.py`. Reads the `STATE` field and `DXCC` code (`DXCC=291` for US, `DXCC=1` for Canada).
+
+**Counties** (US only) are read from `us_counties.geojson`, also downloaded by `adif_setup.py`. Reads the `CNTY` field (e.g. `WA,King`). County/Parish/Borough suffixes are stripped automatically before matching.
+
+All three overlay layers are independently toggleable in the map's native layer control (top-right).
+
+### Interactive Filter Panel (`--show-mode-filters`)
+
+Adding `--show-mode-filters` injects a collapsible **Filters** panel in the top-left corner of the map. It starts collapsed — click to expand.
+
+```bash
+python adif_map.py mylog.adi --overlay states,counties --show-mode-filters
+```
+
+The panel has two sections:
+
+**Modes** — toggles contact dot visibility by mode group. Contacts are clustered into groups defined in the code:
+
+| Group | Includes |
+|---|---|
+| CW | CW |
+| SSB | SSB, USB, LSB, AM, FM |
+| Digital | FT8, FT4, FT4, DATA, RTTY, JT65, JT9, PSK31, and others |
+| Other | Any mode not matched above |
+
+Unchecking a group removes those contacts from the map entirely.
+
+**Bands** — does not affect contact dot visibility, but dynamically recomputes the overlay choropleth colors. Unchecking 40m instantly updates the state/county/grid fill colors to reflect only your remaining active bands. This is useful for questions like "which counties have I confirmed on CW and 20m?"
+
+When `--show-mode-filters` is active with overlays, the overlay coloring is fully dynamic — every mode and band toggle immediately recomputes confirmed/worked/needed status for every entity on screen.
+
+> **Known limitation:** Individual sub-mode checkboxes (e.g. FM within the SSB group) are displayed but currently filter at the group level only. Unchecking FM shows the SSB group checkbox as partially active, but the map still reflects the full SSB group. Per-mode filtering within groups is a planned improvement.
+
+### Color Themes
+
+Colors and stroke widths are controlled by `theme_default.yaml`. Copy and edit it, then pass `--theme mytheme.yaml`:
+
+```yaml
+overlay:
+  states:
+    confirmed_weight: 3.0      # thicker state borders
+    confirmed: "#27ae60"       # slightly different green
+  counties:
+    confirmed: "#1a5c33"       # darker county fill
+```
+
+The `contact_dot` section controls the appearance of contact markers (radius, fill opacity, border color and weight).
 
 ![Show each Base location](show_activation_location.jpg)
 
-Output file example is below:<img src="TF_Contacts.jpg" alt="TF_Contacts" style="zoom:50%;" />
+<img src="TF_Contacts.jpg" alt="TF_Contacts" style="zoom:50%;" />
 
 ## `qrz_common.py` — Shared Library
 
