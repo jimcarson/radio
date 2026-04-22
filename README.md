@@ -12,6 +12,8 @@ Because LoTW can often incur processing delays, I've often forgotten and uploade
 
 These scripts provides a mechanism of bulk-correcting your own data in QRZ via the QRZ API.  They will require an API key (which you can get with a premium QRZ membership).
 
+3) Two years ago, you spent a couple of weeks driving around Iceland, activating 11 parks, and your wanderlust wants to see the contacts on a map.  
+
 USE AT YOUR OWN RISK.  These are presented AS IS and without any warranty.  
 
 ---
@@ -23,6 +25,7 @@ USE AT YOUR OWN RISK.  These are presented AS IS and without any warranty.
 | `qrz_common.py` | Shared library — ADIF parsing, QRZ API client, field converters, Maidenhead grid utilities, config loading |
 | `resolve_qrz_discrepancies.py` | Corrects Grid, State, and County discrepancies reported by QRZ's Awards pages as well as allowing bulk correction of your own records. |
 | `adif_extract.py` | Extracts QSOs from a QRZ ADIF export to an inspection CSV; supports date-range and single-date filtering. Produces a ready-to-edit file that feeds directly into `resolve_qrz_discrepancies.py`. |
+| `adif_map.py` | Plots an ADIF file on a browser-based map.  Activating location is shown.  You can optionally show contacts by band.  |
 | `reconcile_adif.py` | Compares LoTW and QRZ ADIF exports and optionally pushes corrections to QRZ |
 | `sample_corrections.csv` | Annotated sample CSV covering all supported `field` keywords — copy and edit for your own use |
 
@@ -33,18 +36,18 @@ All files must be in the same directory. `qrz_common.py` is not run directly.
 ## Requirements
 
 ```
-pip install pandas openpyxl requests
+pip install pandas openpyxl requests folium
 ```
 
 Python 3.10 or later is recommended.  A requirements.txt file with instructions on creating a custom environment is provided.
 
-There are only three non-standard libraries used and versions very conservative, e.g., Currently pandas 3.x is shipping, but we only require at least 1.5.
+There are only four non-standard libraries used and versions very conservative, e.g., Currently pandas 3.x is shipping, but we only require at least 1.5.
 
 ---
 
 ## Callsign File Naming
 
-Both tools use files named after your callsign (API key file, config file). Because portable callsigns can contain a `/` which is not valid in filenames, replace `/` with `_`.  For example:
+Both of the QSO modifying tools use files named after your callsign (API key file, config file). Because portable callsigns can contain a `/` which is not valid in filenames, replace `/` with `_`.  For example:
 
 | Callsign | Key file | Config file |
 |---|---|---|
@@ -498,6 +501,46 @@ One row per field-level discrepancy found. Clean records with no discrepancies a
 Contains only records with at least one `corrected` field change. Can be imported into QRZ manually via **Logbook → Settings → ADIF Import** as an alternative to `--update-qrz`.
 
 ---
+
+## `adif_map.py` 
+
+Plots an ADIF file on a map in your browser (in a local file).  
+
+> **Important:** You probably want to use adif_extract.py to pull a subset.  I've tested it with 35k contacts, and it's pretty slow to process, but did work.  
+
+### Quick Start
+
+**1. Extract your logs of interest**
+
+- **LoTW:** Download confirmed QSOs as ADIF (all callsigns can be in one file).
+- **QRZ:** Logbook → Settings → Export. One file per callsign/logbook.
+
+**2. Plot contacts**
+
+```bash
+python adif_map.py extracted.adif
+```
+
+This produces `map_output.html` in the local directory and will launch your default browser to load the file.  
+
+### All Options
+
+```
+--band <BAND>            Filter by band (e.g., 40M, 20m)
+--mode <MODE>            Filter by mode (e.g., SSB, CW, FT8)
+--date-from <DATE>       Filter QSOs on or after date (YYYYMMDD)
+--date-to <DATE>         Filter QSOs on or before date (YYYYMMDD)
+--confirmed              Only show confirmed QSOs (LoTW or QRZ)
+--no-arcs                Suppress great-circle arcs
+--cluster-by-band        Preview corrections without writing to QRZ
+--output <file>          Output html file name (default: map_output.html)
+```
+
+The map will look at each QSO for your location, then plot those on a map.  For example, during a trip around Iceland, I activated 11 parks.  Arcs project from each to the other station.
+
+![Show each Base location](show_activation_location.jpg)
+
+Output file example is below:<img src="TF_Contacts.jpg" alt="TF_Contacts" style="zoom:50%;" />
 
 ## `qrz_common.py` — Shared Library
 
