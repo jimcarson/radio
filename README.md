@@ -12,7 +12,7 @@ Because LoTW can often incur processing delays, I've often forgotten and uploade
 
 These scripts provides a mechanism of bulk-correcting your own data in QRZ via the QRZ API.  They will require an API key (which you can get with a premium QRZ membership).
 
-3) Two years ago, you spent a couple of weeks driving around Iceland, activating 11 parks, and your wanderlust wants to see the contacts on a map.  
+3) Two years ago, I spent a couple of weeks driving around Iceland, activating 11 parks, and my wanderlust wants to see the contacts on a map.  
 
 USE AT YOUR OWN RISK.  These are presented AS IS and without any warranty.  
 
@@ -29,6 +29,8 @@ USE AT YOUR OWN RISK.  These are presented AS IS and without any warranty.
 | `adif_map.py` | Plots an ADIF file on a browser-based map. Your activating location(s) are shown. Filter by band, mode, date, or confirmed status. Optional overlays show worked/confirmed grid squares and US states + Canadian provinces. |
 | `reconcile_adif.py` | Compares LoTW and QRZ ADIF exports and optionally pushes corrections to QRZ |
 | `sample_corrections.csv` | Annotated sample CSV covering all supported `field` keywords — copy and edit for your own use |
+| `sample.cfg` | Sample per-field rules configuration file for `reconcile_adif.py` — copy to `<CALLSIGN>.cfg` and edit |
+| `ne_states.geojson` | Cached US + Canada boundary file written by `adif_setup.py` — not tracked in git, generated on first run |
 
 All files must be in the same directory. `qrz_common.py` is not run directly. `adif_map.py` imports from `qrz_common.py` for ADIF parsing, grid conversion, and date normalisation. `adif_setup.py` is run once to cache boundary data for the states overlay.
 
@@ -48,7 +50,7 @@ There are only four non-standard libraries used and versions very conservative, 
 
 ## Callsign File Naming
 
-Both of the QSO modifying tools use files named after your callsign (API key file, config file). Because portable callsigns can contain a `/` which is not valid in filenames, replace `/` with `_`.  For example:
+The QRZ API tools (`resolve_qrz_discrepancies.py` and `reconcile_adif.py`) use files named after your callsign (API key file, config file). Because portable callsigns can contain a `/` which is not valid in filenames, replace `/` with `_`.  For example:
 
 | Callsign | Key file | Config file |
 |---|---|---|
@@ -87,18 +89,17 @@ It can also be used to bulk update your own records.
 - **ADIF export:** Logbook → Settings → Export.   Wait.  Click Settings again to refresh.  Save the `.adi` file.
 - **Discrepancy report:** Logbook → Awards → United States Counties Award → Details → Export. Save as Excel (`.xlsx`).
 
-**2. Find discrepancies in QRZ**
+**2. Export discrepancy reports from QRZ Awards**
 
-There is no bulk export option for these.  Rather, rather we visit the Awards page for each.
+QRZ does not provide a bulk export for all discrepancy types at once — you visit each Awards page separately:
 
-    Awards → Click on your call sign → Click on United States Counties Award → 
+    Logbook → Awards → [Your Callsign] → Grid Squares Award → (copy table or use Export)
+    Logbook → Awards → [Your Callsign] → United States Counties Award → (copy table or use Export)
+    Logbook → Awards → [Your Callsign] → United States States Award → (copy table or use Export)
 
-Select and copy the table displayed.  Repeat this for these pages:
+Paste each table into a separate sheet (`Grids`, `County`, `State`) in an Excel workbook and save as `.xlsx`.
 
-    Awards → Click on your call sign → Click on Grid Squared Award → 
-    Awards → Click on your call sign → Click on United States Counties → 
-
-**2. Preview first (dry-run is the default)**
+**3. Preview first (dry-run is the default)**
 
 ```bash
 python resolve_qrz_discrepancies.py \
@@ -107,7 +108,7 @@ python resolve_qrz_discrepancies.py \
     --call  WT8P
 ```
 
-**3. Apply corrections**
+**4. Apply corrections**
 
 ```bash
 python resolve_qrz_discrepancies.py \
@@ -125,6 +126,7 @@ python resolve_qrz_discrepancies.py \
 --adif <file>               Your QRZ ADIF export (must contain APP_QRZLOG_LOGID)
 --call <callsign>           Your callsign (e.g. WT8P or TF/WT8P)
 --key <api-key>             QRZ API key — optional if <CALLSIGN>.key file exists
+--my-station                Correct your own station fields instead of the other party's
 --update                    Apply changes to QRZ (default is dry-run — preview only)
 --derive-coords             Derive related fields automatically (see Coordinate Derivation below)
 --grid-precision {4,6,8}    Maidenhead precision when deriving grid from coordinates (default: 6)
@@ -147,7 +149,7 @@ Column headers are matched by prefix, so `You Entered county`, `You Entered grid
 
 **MISC sheet** (optional, supports all field keywords):
 
-Add a sheet named `MISC` to your workbook with the same column format as the flat CSV: `field`, `qso_date`, `qso_with`, `new_value`, and optionally `note`. This sheet accepts every field keyword listed in the CSV Field Reference below — including `MY_GRIDSQUARE`, `MY_LOC`, `MY_LAT`/`MY_LON`, `MY_STATE`, `MY_CNTY`, and `COMMENT` — making it the easiest way to correct your own station fields from within the same Excel workbook. The `--derive-coords` and `--grid-precision` options apply to MISC sheet rows exactly as they do to CSV rows. Blank rows and rows whose first cell starts with `#` are skipped.
+Add a sheet named `MISC` to your workbook with the same column format as the flat CSV: `field`, `qso_date`, `qso_with`, `new_value`, and optionally `note`. This sheet accepts every field keyword listed in the CSV Field Reference below — including `MY_GRIDSQUARE`, `MY_LOC`, `MY_LAT`/`MY_LON`, `MY_STATE`, `MY_CNTY`, `MY_CITY`, `MY_COUNTRY`, `MY_CQ_ZONE`, `MY_ITU_ZONE`, `MY_NAME`, and `COMMENT` — making it the easiest way to correct your own station fields from within the same Excel workbook. The `--derive-coords` and `--grid-precision` options apply to MISC sheet rows exactly as they do to CSV rows. Blank rows and rows whose first cell starts with `#` are skipped.
 
 ### Input: Flat CSV (`--input-csv`)
 
@@ -217,6 +219,15 @@ MY_LOC,2025-08-11 02:22:00,W1AW,"47.5625,-122.058"
 # three fields updated consistently.
 MY_GRIDSQUARE,2025-08-11 02:22:00,W1AW,CN87xn
 
+# ── Other station informational fields ────────────────────────────────────────
+# These pass through to QRZ as-is.  Useful when a portable operation logs with
+# the wrong city, country, or zone from a home-location default.
+MY_CITY,2025-08-11 02:22:00,W1AW,Bellevue
+MY_COUNTRY,2025-08-11 02:22:00,W1AW,United States
+MY_CQ_ZONE,2025-08-11 02:22:00,W1AW,3
+MY_ITU_ZONE,2025-08-11 02:22:00,W1AW,6
+MY_NAME,2025-08-11 02:22:00,W1AW,Jim Carson
+
 # ── Comment field ──────────────────────────────────────────────────────────────
 # COMMENT sets the QRZ logbook comment.
 # Useful for adding or correcting POTA/SOTA park references logged in the field.
@@ -236,11 +247,16 @@ COMMENT,2026-03-28 16:35:00,AB0LV,US-3263 Scenic Beach State Park WA
 | `MY_LAT` | `MY_LAT` | Your latitude (decimal or ADIF native format) |
 | `MY_LON` | `MY_LON` | Your longitude (decimal or ADIF native format) |
 | `MY_LOC` | `MY_LAT` + `MY_LON` | Combined lat/lon — value must be quoted `"lat,lon"`; also updates `MY_GRIDSQUARE` with `--derive-coords` |
+| `MY_CITY` | `MY_CITY` | Your station city / QTH |
+| `MY_COUNTRY` | `MY_COUNTRY` | Your station country |
+| `MY_CQ_ZONE` | `MY_CQ_ZONE` | Your CQ zone number |
+| `MY_ITU_ZONE` | `MY_ITU_ZONE` | Your ITU zone number |
+| `MY_NAME` | `MY_NAME` | Your name as logged |
 | `COMMENT` | `COMMENT` | QRZ logbook comment (free text) |
 
 ### Correcting Your Own Station's Fields
 
-Use the `MY_` prefix in the `field` column to correct your own station fields — no special flag is needed. `MY_GRIDSQUARE`, `MY_STATE`, `MY_CNTY`, `MY_LAT`, `MY_LON`, and `MY_LOC` are all valid keywords in both the flat CSV and the Excel `MISC` sheet.
+Use the `MY_` prefix in the `field` column to correct your own station fields — no special flag is needed. The following are all valid in both the flat CSV and the Excel `MISC` sheet: `MY_GRIDSQUARE`, `MY_STATE`, `MY_CNTY`, `MY_LAT`, `MY_LON`, `MY_LOC`, `MY_CITY`, `MY_COUNTRY`, `MY_CQ_ZONE`, `MY_ITU_ZONE`, and `MY_NAME`.
 
 **`MY_LAT` and `MY_LON`** accept either decimal degrees or ADIF native format:
 
