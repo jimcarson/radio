@@ -25,11 +25,12 @@ USE AT YOUR OWN RISK.  These are presented AS IS and without any warranty.
 | `qrz_common.py` | Shared library — ADIF parsing, QRZ API client, field converters, Maidenhead grid utilities, config loading |
 | `resolve_qrz_discrepancies.py` | Corrects Grid, State, and County discrepancies reported by QRZ's Awards pages as well as allowing bulk correction of your own records. |
 | `adif_extract.py` | Extracts QSOs from a QRZ ADIF export to an inspection CSV; supports date-range and single-date filtering. Produces a ready-to-edit file that feeds directly into `resolve_qrz_discrepancies.py`. |
-| `adif_map.py` | Plots an ADIF file on a browser-based map.  Activating location is shown.  You can optionally show contacts by band.  |
+| `adif_setup.py` | One-time setup — downloads and caches the state/province boundary file used by `--overlay states`. Run once before first use. |
+| `adif_map.py` | Plots an ADIF file on a browser-based map. Your activating location(s) are shown. Filter by band, mode, date, or confirmed status. Optional overlays show worked/confirmed grid squares and US states + Canadian provinces. |
 | `reconcile_adif.py` | Compares LoTW and QRZ ADIF exports and optionally pushes corrections to QRZ |
 | `sample_corrections.csv` | Annotated sample CSV covering all supported `field` keywords — copy and edit for your own use |
 
-All files must be in the same directory. `qrz_common.py` is not run directly. `adif_map.py` imports from `qrz_common.py` for ADIF parsing, grid conversion, and date normalisation.
+All files must be in the same directory. `qrz_common.py` is not run directly. `adif_map.py` imports from `qrz_common.py` for ADIF parsing, grid conversion, and date normalisation. `adif_setup.py` is run once to cache boundary data for the states overlay.
 
 ---
 
@@ -508,6 +509,36 @@ Plots an ADIF file on a map in your browser (in a local file).
 
 > **Important:** You probably want to use adif_extract.py to pull a subset.  I've tested it with 35k contacts, and it's pretty slow to process, but did work.  
 
+### Overlays
+
+The `--overlay` flag adds choropleth layers showing which grid squares or states/provinces you've worked, colour-coded by confirmation status:
+
+| Colour | Meaning |
+|---|---|
+| Green | At least one confirmed QSO (LoTW or QSL received) |
+| Amber | Worked but no confirmed QSO |
+| White (no polygon) | Not worked under the current filter |
+
+```bash
+# Grid squares only
+python adif_map.py mylog.adi --overlay grids
+
+# States and provinces only
+python adif_map.py mylog.adi --overlay states
+
+# Both at once
+python adif_map.py mylog.adi --overlay grids,states
+
+# Combine with filters — overlay reflects only the filtered set
+python adif_map.py mylog.adi --band 20m --confirmed --overlay grids,states
+```
+
+**Grid squares** are generated entirely in Python from the `GRIDSQUARE` field (4-character precision, e.g. FN31). Only squares that appear in your filtered log are drawn — no external data file required.
+
+**States and provinces** (US + Canada) are read from `ne_states.geojson`, a cached boundary file downloaded by `adif_setup.py`. Run that script once before first use. The overlay reads the `STATE` field and `DXCC` code from each QSO record (`DXCC=291` for US, `DXCC=1` for Canada).
+
+Both overlays are independently toggleable in the map's layer control.
+
 ### Quick Start
 
 **1. Get your ADIF file**
@@ -532,6 +563,7 @@ This produces `map_output.html` in the same directory as the ADIF file and opens
 --confirmed              Only show confirmed QSOs (LoTW or QRZ)
 --no-arcs                Suppress great-circle arcs
 --cluster-by-band        Separate cluster bubble per band, toggleable via layer control
+--overlay <LIST>         Comma-separated overlays: grids, states (e.g. --overlay grids,states)
 --output <file>          Output html file name (default: map_output.html)
 ```
 

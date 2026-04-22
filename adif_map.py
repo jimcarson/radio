@@ -4,6 +4,7 @@ adif_map.py — Ham radio contact map viewer
 Parses an ADIF log file and renders contacts on an interactive Leaflet map via folium.
 
 Part of the QRZ Logbook Tools suite. Requires qrz_common.py in the same directory.
+Run adif_setup.py once before using --overlay states.
 
 Dependencies:
     pip install folium
@@ -20,6 +21,7 @@ Options:
     --confirmed             Only show confirmed QSOs (LoTW or QSL card received)
     --no-arcs               Suppress great-circle arc lines
     --cluster-by-band       Separate cluster bubble per band (default: all bands together)
+    --overlay LIST          Comma-separated overlays: grids,states (e.g. --overlay grids,states)
     --output FILE           Output HTML filename (default: map_output.html next to input file)
 """
 
@@ -355,12 +357,235 @@ def build_map(my_coords, records, show_arcs: bool, cluster_by_band: bool = False
     else:
         shared_fg.add_to(m)
 
-    folium.LayerControl(collapsed=False).add_to(m)
-
     if skipped:
         print(f"  Note: {skipped} QSO(s) skipped — no usable coordinates found.")
 
     return m, len(records) - skipped
+
+
+# ---------------------------------------------------------------------------
+# Overlay helpers
+# ---------------------------------------------------------------------------
+
+def _classify_contacts(records: list, key_fn) -> dict:
+    """
+    Build a status dict: entity_key -> 'confirmed' | 'worked'
+    key_fn(record) -> str key (e.g. 4-char grid, state abbr).
+    Returns only entities that appear in the records.
+    """
+    status: dict[str, str] = {}
+    counts: dict[str, int] = {}
+    for r in records:
+        key = key_fn(r)
+        if not key:
+            continue
+        confirmed = (
+            r.get('LOTW_QSL_RCVD', '').upper() == 'Y' or
+            r.get('QSLRCD', '').upper() == 'Y'
+        )
+        counts[key] = counts.get(key, 0) + 1
+        if confirmed:
+            status[key] = 'confirmed'
+        elif key not in status:
+            status[key] = 'worked'
+    return status, counts
+
+
+# ---------------------------------------------------------------------------
+# Grid square overlay  (pure Python / GeoJSON)
+# ---------------------------------------------------------------------------
+
+OVERLAY_COLORS = {
+    'confirmed': '#2ecc71',   # green
+    'worked':    '#f39c12',   # amber
+}
+
+def _grid4_polygon(grid4: str) -> list:
+    """Return a closed GeoJSON ring for a 4-char Maidenhead grid square."""
+    g = grid4.upper()
+    lon = (ord(g[0]) - ord('A')) * 20 - 180
+    lat = (ord(g[1]) - ord('A')) * 10 - 90
+    lon += (ord(g[2]) - ord('0')) * 2
+    lat += (ord(g[3]) - ord('0')) * 1
+    return [
+        [lon,   lat],
+        [lon+2, lat],
+        [lon+2, lat+1],
+        [lon,   lat+1],
+        [lon,   lat],
+    ]
+
+
+def build_grid_overlay(m, records: list) -> None:
+    """
+    Add a grid-square choropleth layer to the map.
+    Only squares present in records are drawn:
+      green  = at least one confirmed QSO
+      amber  = worked but no confirmed QSO
+    """
+    import json
+
+    def grid_key(r):
+        g = r.get('GRIDSQUARE', '')[:4].upper()
+        return g if len(g) == 4 else ''
+
+    status, counts = _classify_contacts(records, grid_key)
+    if not status:
+        print("  Grid overlay: no GRIDSQUARE data found in records — skipping.")
+        return
+
+    features = []
+    for grid, state in status.items():
+        try:
+            ring = _grid4_polygon(grid)
+        except Exception:
+            continue
+        n = counts.get(grid, 0)
+        features.append({
+            'type': 'Feature',
+            'properties': {
+                'grid':   grid,
+                'status': state,
+                'count':  n,
+                'tooltip': f"{grid} — {state} ({n} QSO{'s' if n != 1 else ''})",
+            },
+            'geometry': {'type': 'Polygon', 'coordinates': [ring]},
+        })
+
+    geojson = {'type': 'FeatureCollection', 'features': features}
+
+    def style_fn(feature):
+        color = OVERLAY_COLORS.get(feature['properties']['status'], '#888888')
+        return {
+            'fillColor':   color,
+            'color':       color,
+            'weight':      1,
+            'fillOpacity': 0.45,
+        }
+
+    fg = folium.FeatureGroup(name='Overlay: Grid squares', show=True)
+    folium.GeoJson(
+        geojson,
+        style_function=style_fn,
+        tooltip=folium.GeoJsonTooltip(fields=['tooltip'], aliases=[''], labels=False),
+    ).add_to(fg)
+    fg.add_to(m)
+
+    confirmed_n = sum(1 for s in status.values() if s == 'confirmed')
+    worked_n    = sum(1 for s in status.values() if s == 'worked')
+    print(f"  Grid overlay: {confirmed_n} confirmed, {worked_n} worked-only squares.")
+
+
+
+# ---------------------------------------------------------------------------
+# States / provinces overlay  (reads cached ne_states.geojson)
+# ---------------------------------------------------------------------------
+
+# Cache file written by adif_setup.py — must be in the same dir as adif_map.py
+_STATES_CACHE = Path(__file__).parent / "ne_states.geojson"
+
+# DXCC entity codes
+_DXCC_US = '291'
+_DXCC_CA = '1'
+
+
+def _us_state_key(r: dict) -> str:
+    if r.get('DXCC', '') == _DXCC_US:
+        return r.get('STATE', '').upper().strip()[:2]
+    return ''
+
+
+def _ca_prov_key(r: dict) -> str:
+    if r.get('DXCC', '') == _DXCC_CA:
+        return r.get('STATE', '').upper().strip()[:2]
+    return ''
+
+
+def build_states_overlay(m, records: list) -> None:
+    """
+    Add a US states + Canadian provinces choropleth layer.
+    Reads ne_states.geojson cached by adif_setup.py.
+    """
+    import json
+
+    if not _STATES_CACHE.exists():
+        print(
+            "  States overlay: ne_states.geojson not found.\n"
+            "  Run  python adif_setup.py  once to download boundary data."
+        )
+        return
+
+    # Load cached boundary file
+    try:
+        geojson = json.loads(_STATES_CACHE.read_text(encoding="utf-8"))
+    except Exception as exc:
+        print(f"  States overlay: could not read {_STATES_CACHE.name}: {exc}")
+        return
+
+    # Build worked/confirmed lookup from filtered records
+    us_status, us_counts = _classify_contacts(records, _us_state_key)
+    ca_status, ca_counts = _classify_contacts(records, _ca_prov_key)
+    us_status.pop('', None);  us_counts.pop('', None)
+    ca_status.pop('', None);  ca_counts.pop('', None)
+
+    # Merge into one lookup keyed by postal code
+    lookup = {}
+    for code, state in {**us_status, **ca_status}.items():
+        counts = us_counts if code in us_status else ca_counts
+        lookup[code] = {'status': state, 'count': counts.get(code, 0)}
+
+    confirmed_n = sum(1 for s in lookup.values() if s['status'] == 'confirmed')
+    worked_n    = sum(1 for s in lookup.values() if s['status'] == 'worked')
+    print(f"  States overlay: {confirmed_n} confirmed, {worked_n} worked-only entities.")
+
+    if not lookup and not geojson.get('features'):
+        print("  States overlay: no US/CA STATE data found — skipping.")
+        return
+
+    def style_fn(feature):
+        postal = (feature['properties'].get('postal') or '').upper()
+        info   = lookup.get(postal)
+        if not info:
+            # Not worked — faint outline, no fill
+            return {
+                'fillColor':   '#ffffff',
+                'color':       '#aaaaaa',
+                'weight':      0.5,
+                'fillOpacity': 0.15,
+            }
+        color = OVERLAY_COLORS.get(info['status'], '#888888')
+        return {
+            'fillColor':   color,
+            'color':       color,
+            'weight':      1,
+            'fillOpacity': 0.45,
+        }
+
+    def tooltip_fn(feature):
+        postal = (feature['properties'].get('postal') or '').upper()
+        name   = feature['properties'].get('name', postal)
+        info   = lookup.get(postal)
+        if info:
+            n   = info['count']
+            tip = (f"{name} ({postal}) — {info['status']} "
+                   f"({n} QSO{'s' if n != 1 else ''})")
+        else:
+            tip = f"{name} ({postal}) — not worked"
+        return folium.Tooltip(tip)
+
+    fg = folium.FeatureGroup(name='Overlay: States & Provinces', show=True)
+
+    folium.GeoJson(
+        geojson,
+        style_function=style_fn,
+        tooltip=folium.GeoJsonTooltip(
+            fields=['postal', 'name'],
+            aliases=['Code', 'Name'],
+            localize=True,
+        ),
+    ).add_to(fg)
+
+    fg.add_to(m)
 
 
 # ---------------------------------------------------------------------------
@@ -387,6 +612,35 @@ def add_legend(m, band_groups):
     m.get_root().html.add_child(folium.Element(legend_html))
 
 
+def add_overlay_legend(m, overlays: list) -> None:
+    """Add a small overlay status legend (confirmed / worked) when overlays are active."""
+    if not overlays:
+        return
+    items = (
+        '<div style="display:flex;align-items:center;gap:6px;margin:2px 0">'
+        '<span style="display:inline-block;width:14px;height:14px;'
+        f'background:{OVERLAY_COLORS["confirmed"]};border:1px solid #555;opacity:0.8"></span>'
+        '<span>Confirmed</span></div>'
+        '<div style="display:flex;align-items:center;gap:6px;margin:2px 0">'
+        '<span style="display:inline-block;width:14px;height:14px;'
+        f'background:{OVERLAY_COLORS["worked"]};border:1px solid #555;opacity:0.8"></span>'
+        '<span>Worked (unconfirmed)</span></div>'
+        '<div style="display:flex;align-items:center;gap:6px;margin:2px 0">'
+        '<span style="display:inline-block;width:14px;height:14px;'
+        'background:#ffffff;border:1px solid #999"></span>'
+        '<span>Not worked</span></div>'
+    )
+    html = f"""
+    <div style="position:fixed;bottom:30px;left:160px;z-index:9999;
+                background:rgba(255,255,255,0.9);padding:10px 14px;
+                border-radius:8px;border:1px solid #aaa;font-size:13px;
+                font-family:sans-serif;box-shadow:2px 2px 6px rgba(0,0,0,0.3)">
+      <b>Overlay</b><br>{items}
+    </div>
+    """
+    m.get_root().html.add_child(folium.Element(html))
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -407,6 +661,8 @@ def main():
                         help="Suppress great-circle arc lines")
     parser.add_argument("--cluster-by-band", dest="cluster_by_band", action="store_true",
                         help="Separate cluster bubble per band, toggleable via layer control (default: all bands together)")
+    parser.add_argument("--overlay",
+                        help="Comma-separated overlays to add: grids, states (e.g. --overlay grids,states)")
     parser.add_argument("--output",    help="Output HTML path (default: map_output.html beside input)")
     args = parser.parse_args()
 
@@ -440,6 +696,20 @@ def main():
     used_bands = {r.get('BAND', 'unknown').lower() for r in filtered if resolve_coords(r)}
     add_legend(m, {b: None for b in used_bands})
 
+    # Overlays
+    overlays = [o.strip().lower() for o in (args.overlay or "").split(",") if o.strip()]
+    if "grids" in overlays:
+        print("Building grid square overlay ...")
+        build_grid_overlay(m, filtered)
+    if "states" in overlays:
+        print("Building states/provinces overlay ...")
+        build_states_overlay(m, filtered)
+    if overlays:
+        add_overlay_legend(m, overlays)
+
+    # Single LayerControl added after all layers (including overlays) are built
+    folium.LayerControl(collapsed=False).add_to(m)
+
     # Output path
     if args.output:
         out_path = Path(args.output).expanduser().resolve()
@@ -451,6 +721,7 @@ def main():
     print(f"  Plotted {plotted} contacts.")
 
     webbrowser.open(out_path.as_uri())
+
 
 
 if __name__ == "__main__":
