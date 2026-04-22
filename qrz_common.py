@@ -114,6 +114,54 @@ def format_qso_datetime(date_adif: str, time_adif: str) -> tuple[str, str]:
     return d, t
 
 
+def open_text_file(path: Path, mode: str = "r") -> object:
+    """
+    Open a text file for reading with automatic encoding detection.
+
+    Tries encodings in order:
+      1. utf-8-sig  — UTF-8 with or without BOM (Excel's "Save as UTF-8 CSV")
+      2. cp1252     — Windows Western European / Latin-1 superset; covers
+                      accented characters saved by Windows apps like Excel
+
+    On a successful fallback to cp1252 a WARNING is logged so the caller
+    is aware the file was not UTF-8.  All files written by these tools use
+    UTF-8, so the fallback only matters for files edited externally.
+
+    Returns an open file object in the requested mode.  The caller is
+    responsible for closing it (use as a context manager).
+    """
+    encodings = [("utf-8-sig", False), ("cp1252", True)]
+    for encoding, warn in encodings:
+        try:
+            f = path.open(mode=mode, newline="", encoding=encoding, errors="strict")
+            # For reading, consume the whole file to catch any decode error,
+            # then rewind.  Files are small (CSV/text), so this is fine.
+            if "r" in mode:
+                f.read()
+                f.seek(0)
+            if warn:
+                log.warning(
+                    "%s does not appear to be UTF-8; re-reading as cp1252 "
+                    "(Windows Latin-1). Consider saving as UTF-8 in Excel "
+                    "via File → Save As → CSV UTF-8 (comma delimited).",
+                    path.name,
+                )
+            return f
+        except (UnicodeDecodeError, LookupError):
+            try:
+                f.close()
+            except Exception:
+                pass
+            continue
+    # Last resort: replace undecodable bytes rather than crashing
+    log.error(
+        "%s could not be decoded as UTF-8 or cp1252; "
+        "opening with errors='replace'. Some characters may be lost.",
+        path.name,
+    )
+    return path.open(mode=mode, newline="", encoding="utf-8", errors="replace")
+
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
