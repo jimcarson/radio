@@ -2,9 +2,10 @@
 """
 adif_setup.py — One-time setup for adif_map.py boundary data.
 
-Downloads and caches the Natural Earth state/province boundary file
-used by the --overlay states option.  Run this once; re-run only if
-the cache file is deleted or you want to refresh the data.
+Downloads and caches the Natural Earth 50m state/province boundary file
+used by the --overlay states option.  The 50m dataset is required (not 110m)
+because the 110m file omits NT, NU, PE, and YT at that resolution.
+Run this once; re-run only if the cache file is deleted or you want to refresh.
 
 Usage:
     python adif_setup.py
@@ -36,28 +37,40 @@ except ImportError:
 SCRIPT_DIR  = Path(__file__).parent
 OUTPUT_FILE = SCRIPT_DIR / "ne_states.geojson"
 
-# Natural Earth 110m admin-1 states/provinces
-# Primary: official Natural Earth CDN (zip containing shapefile + geojson)
-# Fallback: GitHub mirror of the geojson directly
+# Natural Earth admin-1 states/provinces boundary data.
+#
+# IMPORTANT: Use the 50m dataset, not 110m.
+# At 110m resolution Natural Earth omits four Canadian provinces/territories
+# (NT, NU, PE, YT) because they are too small or sparse at that scale.
+# The 50m file includes all 13 CA provinces and territories.
+#
+# Source order: try each in sequence, stop on first success.
 SOURCES = [
     {
-        "label":  "Natural Earth CDN (zip)",
-        "url":    "https://naciscdn.org/naturalearth/110m/cultural/"
-                  "ne_110m_admin_1_states_provinces.zip",
-        "format": "zip",
-        "zip_name": "ne_110m_admin_1_states_provinces.geojson",
+        "label":    "Natural Earth CDN 50m (zip)",
+        "url":      "https://naciscdn.org/naturalearth/50m/cultural/"
+                    "ne_50m_admin_1_states_provinces.zip",
+        "format":   "zip",
+        "zip_name": "ne_50m_admin_1_states_provinces.geojson",
     },
     {
-        "label":  "GitHub mirror (geojson)",
+        "label":  "GitHub mirror 50m (geojson)",
         "url":    "https://raw.githubusercontent.com/nvkelso/"
                   "natural-earth-vector/master/geojson/"
-                  "ne_110m_admin_1_states_provinces.geojson",
+                  "ne_50m_admin_1_states_provinces.geojson",
         "format": "geojson",
     },
     {
-        "label":  "GitHub mirror (geojson, alternate branch)",
+        "label":    "Natural Earth CDN 110m (zip, fallback — missing NT/NU/PE/YT)",
+        "url":      "https://naciscdn.org/naturalearth/110m/cultural/"
+                    "ne_110m_admin_1_states_provinces.zip",
+        "format":   "zip",
+        "zip_name": "ne_110m_admin_1_states_provinces.geojson",
+    },
+    {
+        "label":  "GitHub mirror 110m (geojson, fallback — missing NT/NU/PE/YT)",
         "url":    "https://raw.githubusercontent.com/nvkelso/"
-                  "natural-earth-vector/v5.1.2/geojson/"
+                  "natural-earth-vector/master/geojson/"
                   "ne_110m_admin_1_states_provinces.geojson",
         "format": "geojson",
     },
@@ -233,14 +246,30 @@ def main():
     print(f"    US states/DC:            {us_count}")
     print(f"    CA provinces/territories:{ca_count}")
 
-    # Spot-check that key postal codes are present
+    # Spot-check that all expected postal codes are present.
+    # The four CA entities below are absent from the 110m dataset — their
+    # presence confirms we got the 50m file.
     postals = {f["properties"]["postal"] for f in normalised["features"]}
-    missing = {"WA", "ON", "BC", "TX", "FL"} - postals
-    if missing:
-        print(f"  WARNING: expected postal codes not found: {missing}")
-        print("  The overlay may not match QSO records correctly.")
+
+    ca_required = {"AB", "BC", "MB", "NB", "NL", "NS",
+                   "NT", "NU", "ON", "PE", "QC", "SK", "YT"}
+    us_sample   = {"WA", "TX", "FL", "NY", "CA"}
+    ca_missing  = ca_required - postals
+    us_missing  = us_sample   - postals
+
+    if ca_missing:
+        print(f"  WARNING: missing CA provinces/territories: {ca_missing}")
+        if {"NT", "NU", "PE", "YT"} & ca_missing:
+            print("  This usually means the 110m fallback was used instead of 50m.")
+            print("  NT (Northwest Territories), NU (Nunavut), PE (Prince Edward")
+            print("  Island), and YT (Yukon) are omitted from the 110m dataset.")
+            print("  These entities will not appear in the --overlay states layer.")
+    elif us_missing:
+        print(f"  WARNING: missing US states: {us_missing}")
     else:
-        print(f"  Spot-check postal codes: OK (WA, ON, BC, TX, FL all present)")
+        all_ca = sorted(postals & ca_required)
+        print(f"  All 13 CA provinces/territories present: {', '.join(all_ca)}")
+        print(f"  Spot-check US states: OK")
 
     OUTPUT_FILE.write_text(
         json.dumps(normalised, separators=(",", ":")),
