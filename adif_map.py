@@ -3,26 +3,28 @@
 adif_map.py — Ham radio contact map viewer
 Parses an ADIF log file and renders contacts on an interactive Leaflet map via folium.
 
+Part of the QRZ Logbook Tools suite. Requires qrz_common.py in the same directory.
+
 Dependencies:
     pip install folium
+    (qrz_common.py also requires: pip install requests)
 
 Usage:
     python adif_map.py contacts.adi [options]
 
 Options:
-    --band BAND         Filter by band (e.g. 40m, 20m, 2m)
-    --mode MODE         Filter by mode (e.g. SSB, CW, FT8)
-    --date-from DATE    Filter QSOs on or after date (YYYYMMDD)
-    --date-to DATE      Filter QSOs on or before date (YYYYMMDD)
-    --confirmed         Only show confirmed QSOs (LoTW or QSL card received)
-    --no-arcs           Suppress great-circle arc lines
-    --output FILE       Output HTML filename (default: map_output.html next to input file)
+    --band BAND             Filter by band (e.g. 40m, 20m, 2m)
+    --mode MODE             Filter by mode (e.g. SSB, CW, FT8)
+    --date-from DATE        Filter QSOs on or after date (YYYYMMDD or YYYY-MM-DD)
+    --date-to DATE          Filter QSOs on or before date (YYYYMMDD or YYYY-MM-DD)
+    --confirmed             Only show confirmed QSOs (LoTW or QSL card received)
+    --no-arcs               Suppress great-circle arc lines
+    --cluster-by-band       Separate cluster bubble per band (default: all bands together)
+    --output FILE           Output HTML filename (default: map_output.html next to input file)
 """
 
 import argparse
 import math
-import os
-import re
 import sys
 import webbrowser
 from pathlib import Path
@@ -31,6 +33,19 @@ try:
     import folium
 except ImportError:
     sys.exit("Missing dependency: run  pip install folium")
+
+try:
+    import qrz_common
+    from qrz_common import (
+        parse_adif_with_header,
+        adif_latlon_to_decimal,
+        grid_to_latlon,
+        parse_qso_datetime,
+    )
+except ImportError:
+    sys.exit(
+        "Missing qrz_common.py — ensure it is in the same directory as adif_map.py."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -55,127 +70,23 @@ DEFAULT_COLOR = "#888888"
 
 
 # ---------------------------------------------------------------------------
-# Maidenhead grid → (lat, lon) centre
+# Coordinate resolution  (parsing delegated to qrz_common)
 # ---------------------------------------------------------------------------
-def grid_to_latlon(grid: str):
-    """Convert 4- or 6-character Maidenhead locator to (lat, lon)."""
-    g = grid.strip().upper()
-    if len(g) < 4:
-        return None
-    try:
-        lon = (ord(g[0]) - ord('A')) * 20 - 180
-        lat = (ord(g[1]) - ord('A')) * 10 - 90
-        lon += (ord(g[2]) - ord('0')) * 2
-        lat += (ord(g[3]) - ord('0')) * 1
-        if len(g) >= 6:
-            lon += (ord(g[4]) - ord('A')) * (2 / 24) + (1 / 24)
-            lat += (ord(g[5]) - ord('A')) * (1 / 24) + (0.5 / 24)
-        else:
-            lon += 1.0   # centre of 2° cell
-            lat += 0.5   # centre of 1° cell
-        return (round(lat, 5), round(lon, 5))
-    except Exception:
-        return None
-
-
-# ---------------------------------------------------------------------------
-# ADIF parser
-# ---------------------------------------------------------------------------
-def _parse_field(text: str, pos: int):
-    """Read one <TAG:LEN> value starting at pos. Returns (tag, value, next_pos)."""
-    m = re.compile(r'<([^:>]+)(?::(\d+)(?::[^>]*)?)?>').search(text, pos)
-    if not m or m.start() != pos:
-        return None, None, pos + 1
-    tag = m.group(1).upper()
-    length = int(m.group(2)) if m.group(2) else 0
-    start = m.end()
-    value = text[start:start + length]
-    return tag, value, start + length
-
-
-def parse_adif(path: str):
-    """
-    Parse an ADIF file.
-    Returns:
-        header_fields : dict  — fields from the ADIF header
-        records       : list  — list of dicts, one per QSO
-    """
-    text = Path(path).read_text(encoding="utf-8", errors="replace")
-
-    # Split header from records at <EOH>
-    eoh = re.search(r'<EOH>', text, re.IGNORECASE)
-    if eoh:
-        header_text = text[:eoh.start()]
-        body_text   = text[eoh.end():]
-    else:
-        header_text = ""
-        body_text   = text
-
-    def extract_fields(chunk):
-        fields = {}
-        pos = 0
-        while pos < len(chunk):
-            if chunk[pos] != '<':
-                pos += 1
-                continue
-            tag, value, pos = _parse_field(chunk, pos)
-            if tag and value is not None:
-                fields[tag] = value
-        return fields
-
-    header_fields = extract_fields(header_text)
-
-    # Records separated by <EOR>
-    records = []
-    current = {}
-    pos = 0
-    while pos < len(body_text):
-        if body_text[pos] != '<':
-            pos += 1
-            continue
-        tag, value, pos = _parse_field(body_text, pos)
-        if tag is None:
-            continue
-        if tag == 'EOR':
-            if current:
-                records.append(current)
-            current = {}
-        elif value is not None:
-            current[tag] = value
-
-    return header_fields, records
-
-
-# ---------------------------------------------------------------------------
-# Coordinate resolution
-# ---------------------------------------------------------------------------
-def _adif_latlon(val: str):
-    """Parse ADIF LAT/LON field like 'N012 34.567' → decimal degrees."""
-    m = re.match(r'([NSEW])\s*(\d+)\s+(\d+(?:\.\d+)?)', val.strip(), re.IGNORECASE)
-    if not m:
-        try:
-            return float(val)
-        except ValueError:
-            return None
-    hemi, deg, minutes = m.group(1).upper(), int(m.group(2)), float(m.group(3))
-    dd = deg + minutes / 60.0
-    if hemi in ('S', 'W'):
-        dd = -dd
-    return dd
-
-
 def resolve_coords(record: dict):
     """Return (lat, lon) or None for a QSO record."""
     lat_raw = record.get('LAT') or record.get('MY_LAT')
     lon_raw = record.get('LON') or record.get('MY_LON')
     if lat_raw and lon_raw:
-        lat = _adif_latlon(lat_raw)
-        lon = _adif_latlon(lon_raw)
+        lat = adif_latlon_to_decimal(lat_raw)
+        lon = adif_latlon_to_decimal(lon_raw)
         if lat is not None and lon is not None:
             return (lat, lon)
     grid = record.get('GRIDSQUARE') or record.get('GRID')
     if grid:
-        return grid_to_latlon(grid)
+        try:
+            return grid_to_latlon(grid)
+        except (ValueError, Exception):
+            return None
     return None
 
 
@@ -189,14 +100,17 @@ def resolve_my_coords(header: dict, records: list):
     lat_raw = header.get('MY_LAT')
     lon_raw = header.get('MY_LON')
     if lat_raw and lon_raw:
-        lat = _adif_latlon(lat_raw)
-        lon = _adif_latlon(lon_raw)
+        lat = adif_latlon_to_decimal(lat_raw)
+        lon = adif_latlon_to_decimal(lon_raw)
         if lat is not None and lon is not None:
             fallback = (lat, lon)
     if fallback is None:
         grid = header.get('MY_GRIDSQUARE')
         if grid:
-            fallback = grid_to_latlon(grid)
+            try:
+                fallback = grid_to_latlon(grid)
+            except (ValueError, Exception):
+                pass
 
     origins = []
     for r in records:
@@ -216,13 +130,16 @@ def _resolve_my_coords_for_record(record: dict):
     lat_raw = record.get('MY_LAT')
     lon_raw = record.get('MY_LON')
     if lat_raw and lon_raw:
-        lat = _adif_latlon(lat_raw)
-        lon = _adif_latlon(lon_raw)
+        lat = adif_latlon_to_decimal(lat_raw)
+        lon = adif_latlon_to_decimal(lon_raw)
         if lat is not None and lon is not None:
             return (lat, lon)
     grid = record.get('MY_GRIDSQUARE')
     if grid:
-        return grid_to_latlon(grid)
+        try:
+            return grid_to_latlon(grid)
+        except (ValueError, Exception):
+            return None
     return None
 
 
@@ -263,6 +180,10 @@ def is_confirmed(record: dict):
 
 
 def apply_filters(records, args):
+    # Normalise date bounds to YYYYMMDD (accepts YYYYMMDD or YYYY-MM-DD)
+    date_from = parse_qso_datetime(args.date_from)[0] if args.date_from else None
+    date_to   = parse_qso_datetime(args.date_to)[0]   if args.date_to   else None
+
     out = []
     for r in records:
         if args.band and r.get('BAND', '').lower() != args.band.lower():
@@ -270,9 +191,9 @@ def apply_filters(records, args):
         if args.mode and r.get('MODE', '').upper() != args.mode.upper():
             continue
         date = r.get('QSO_DATE', '')
-        if args.date_from and date < args.date_from:
+        if date_from and date < date_from:
             continue
-        if args.date_to and date > args.date_to:
+        if date_to and date > date_to:
             continue
         if args.confirmed and not is_confirmed(r):
             continue
@@ -477,15 +398,15 @@ def main():
     parser.add_argument("--band",      help="Filter by band (e.g. 40m, 20m)")
     parser.add_argument("--mode",      help="Filter by mode (e.g. SSB, CW, FT8)")
     parser.add_argument("--date-from", dest="date_from",
-                        help="Start date filter YYYYMMDD (inclusive)")
+                        help="Start date filter — YYYYMMDD or YYYY-MM-DD (inclusive)")
     parser.add_argument("--date-to",   dest="date_to",
-                        help="End date filter YYYYMMDD (inclusive)")
+                        help="End date filter — YYYYMMDD or YYYY-MM-DD (inclusive)")
     parser.add_argument("--confirmed", action="store_true",
                         help="Only show confirmed QSOs (LoTW or QSL received)")
     parser.add_argument("--no-arcs",   dest="no_arcs", action="store_true",
                         help="Suppress great-circle arc lines")
     parser.add_argument("--cluster-by-band", dest="cluster_by_band", action="store_true",
-                        help="Separate cluster bubble per band (toggleable); default groups all bands together")
+                        help="Separate cluster bubble per band, toggleable via layer control (default: all bands together)")
     parser.add_argument("--output",    help="Output HTML path (default: map_output.html beside input)")
     args = parser.parse_args()
 
@@ -494,7 +415,7 @@ def main():
         sys.exit(f"File not found: {adif_path}")
 
     print(f"Parsing {adif_path.name} ...")
-    header, records = parse_adif(str(adif_path))
+    header, records = parse_adif_with_header(adif_path)
     print(f"  {len(records)} QSO records found.")
 
     my_coords = resolve_my_coords(header, records)

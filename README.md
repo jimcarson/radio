@@ -29,7 +29,7 @@ USE AT YOUR OWN RISK.  These are presented AS IS and without any warranty.
 | `reconcile_adif.py` | Compares LoTW and QRZ ADIF exports and optionally pushes corrections to QRZ |
 | `sample_corrections.csv` | Annotated sample CSV covering all supported `field` keywords — copy and edit for your own use |
 
-All files must be in the same directory. `qrz_common.py` is not run directly.
+All files must be in the same directory. `qrz_common.py` is not run directly. `adif_map.py` imports from `qrz_common.py` for ADIF parsing, grid conversion, and date normalisation.
 
 ---
 
@@ -510,29 +510,28 @@ Plots an ADIF file on a map in your browser (in a local file).
 
 ### Quick Start
 
-**1. Extract your logs of interest**
+**1. Get your ADIF file**
 
-- **LoTW:** Download confirmed QSOs as ADIF (all callsigns can be in one file).
-- **QRZ:** Logbook → Settings → Export. One file per callsign/logbook.
+Any ADIF file will work — a QRZ export, a LoTW download, or the output of `adif_extract.py`. The map reads `MY_LAT`/`MY_LON` or `MY_GRIDSQUARE` per record to determine your transmit location, so portable operations with multiple operating sites are handled automatically.
 
 **2. Plot contacts**
 
 ```bash
-python adif_map.py extracted.adif
+python adif_map.py mylog.adi
 ```
 
-This produces `map_output.html` in the local directory and will launch your default browser to load the file.  
+This produces `map_output.html` in the same directory as the ADIF file and opens it in your default browser.
 
 ### All Options
 
 ```
 --band <BAND>            Filter by band (e.g., 40M, 20m)
 --mode <MODE>            Filter by mode (e.g., SSB, CW, FT8)
---date-from <DATE>       Filter QSOs on or after date (YYYYMMDD)
---date-to <DATE>         Filter QSOs on or before date (YYYYMMDD)
+--date-from <DATE>       Filter QSOs on or after date (YYYYMMDD or YYYY-MM-DD)
+--date-to <DATE>         Filter QSOs on or before date (YYYYMMDD or YYYY-MM-DD)
 --confirmed              Only show confirmed QSOs (LoTW or QRZ)
 --no-arcs                Suppress great-circle arcs
---cluster-by-band        Preview corrections without writing to QRZ
+--cluster-by-band        Separate cluster bubble per band, toggleable via layer control
 --output <file>          Output html file name (default: map_output.html)
 ```
 
@@ -546,13 +545,13 @@ Output file example is below:<img src="TF_Contacts.jpg" alt="TF_Contacts" style=
 
 This file is used by all scripts and is not run directly. It provides:
 
-- **ADIF parser** — handles HTML-escaped brackets from QRZ API responses
+- **ADIF parser** — `parse_adif_file()` for QSO records; `parse_adif_with_header()` also returns header-level fields (used by `adif_map.py` for `MY_LAT`/`MY_LON`/`MY_GRIDSQUARE`); handles HTML-escaped brackets from QRZ API responses
 - **QRZ API client** — `ACTION=INSERT OPTION=REPLACE` for in-place updates
 - **Key file loader** — reads `<CALLSIGN>.key`, maps `/` to `_` in filenames
 - **Config file loader** — reads `<CALLSIGN>.cfg` for per-field rules
 - **Field converters** — `CNTY` display-to-ADIF format, `STATE` normalisation, coordinate validation
-- **Maidenhead grid utilities** — `latlon_to_grid()` converts decimal coordinates to a 4-, 6-, or 8-character grid locator; `grid_to_latlon()` converts a grid locator back to the decimal lat/lon of its centre point
-- **Date/time normalisation** — `parse_qso_datetime()` accepts both ADIF compact format (`YYYYMMDD` / `HHMM`, as found in QRZ exports) and human-readable format (`YYYY-MM-DD` / `HH:MM`), used by both `resolve_qrz_discrepancies.py` and `adif_extract.py`; `format_qso_datetime()` converts ADIF compact to human-readable for CSV output
+- **Maidenhead grid utilities** — `latlon_to_grid()` converts decimal coordinates to a 4-, 6-, or 8-character grid locator; `grid_to_latlon()` converts a grid locator back to the decimal lat/lon of its centre point; `adif_latlon_to_decimal()` converts ADIF `N/S/E/W DDD MM.MMM` coordinate strings to decimal degrees
+- **Date/time normalisation** — `parse_qso_datetime()` accepts both ADIF compact format (`YYYYMMDD` / `HHMM`, as found in QRZ exports) and human-readable format (`YYYY-MM-DD` / `HH:MM`), used by all scripts; `format_qso_datetime()` converts ADIF compact to human-readable for CSV output
 - **Field comparison utilities** — integer normalisation, gridsquare prefix matching, country name mapping
 
 ---

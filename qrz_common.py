@@ -14,11 +14,16 @@ Provides:
   - Date/time normalisation (parse_qso_datetime) — handles both ADIF
     compact format (YYYYMMDD / HHMM) and human-readable (YYYY-MM-DD /
     HH:MM or YYYY-MM-DD HH:MM:SS), used by resolve and adif_extract.
+  - ADIF coordinate parsing (adif_latlon_to_decimal) — converts ADIF
+    N/S/E/W DDD MM.MMM format to decimal degrees.
+  - parse_adif_with_header() — like parse_adif_file() but also returns
+    header fields as a dict; used by adif_map.py.
 
 Imported by:
   - resolve_qrz_discrepancies.py
   - adif_extract.py
   - reconcile_adif.py
+  - adif_map.py
 """
 
 import configparser
@@ -363,6 +368,113 @@ def parse_adif_file(path: Path) -> list[dict]:
 
     log.info("Parsed %d QSO records from %s", len(records), path.name)
     return records
+
+
+def parse_adif_with_header(path: Path) -> tuple[dict, list[dict]]:
+    """
+    Like parse_adif_file(), but also returns header fields as a dict.
+
+    The ADIF header is everything before <EOH>. Fields there use the same
+    <TAG:LEN>value syntax as QSO records. This is used by adif_map.py to
+    read MY_LAT / MY_LON / MY_GRIDSQUARE from the file-level header.
+
+    Returns:
+        (header_fields, qso_records)
+        header_fields -- dict of upper-cased field name -> value (may be empty
+                         if the file has no header or no tagged fields there)
+        qso_records   -- same as parse_adif_file()
+    """
+    text = path.read_text(encoding="utf-8", errors="replace")
+    text = html.unescape(text)
+
+    pattern = re.compile(r"<([^:>]+)(?::(\d+)(?::[^>]*)?)?>", re.IGNORECASE)
+
+    eoh = re.search(r"<EOH>", text, re.IGNORECASE)
+    header_text = text[:eoh.start()] if eoh else ""
+    body_start  = eoh.end() if eoh else 0
+
+    # Parse header fields
+    header_fields: dict = {}
+    pos = 0
+    while pos < len(header_text):
+        m = pattern.search(header_text, pos)
+        if not m:
+            break
+        raw_name = m.group(1).upper()
+        len_str  = m.group(2)
+        tag_end  = m.end()
+        if len_str:
+            length = int(len_str)
+            header_fields[raw_name] = header_text[tag_end: tag_end + length].strip()
+            pos = tag_end + length
+        else:
+            pos = tag_end
+
+    # Parse QSO records using the same pattern
+    records: list[dict] = []
+    current: dict       = {}
+    pos = body_start
+
+    while pos < len(text):
+        m = pattern.search(text, pos)
+        if not m:
+            break
+        tag_end  = m.end()
+        raw_name = m.group(1).upper()
+        len_str  = m.group(2)
+
+        if raw_name == "EOR":
+            if current:
+                records.append(current)
+            current = {}
+            pos = tag_end
+        elif raw_name == "EOH":
+            pos = tag_end
+        elif len_str:
+            length = int(len_str)
+            value  = text[tag_end: tag_end + length].strip()
+            if raw_name == "APP_QRZLOG_LOGID" and value:
+                try:
+                    value = str(int(float(value)))
+                except ValueError:
+                    pass
+            current[raw_name] = value
+            pos = tag_end + length
+        else:
+            pos = tag_end
+
+    log.info("Parsed %d header fields and %d QSO records from %s",
+             len(header_fields), len(records), path.name)
+    return header_fields, records
+
+
+def adif_latlon_to_decimal(value: str) -> Optional[float]:
+    """
+    Convert an ADIF latitude or longitude string to decimal degrees.
+
+    Accepted formats::
+        "N064 23.750"  ->  64.39583
+        "W017 37.500"  -> -17.625
+        "47.5625"      ->  47.5625   (already decimal)
+
+    Returns None if the value cannot be parsed.
+    """
+    v = value.strip()
+    try:
+        return float(v)
+    except ValueError:
+        pass
+    m = re.match(
+        r"^([NSEWnsew])\s*(\d+)\s+(\d+(?:\.\d+)?)$", v)
+    if not m:
+        return None
+    hemi    = m.group(1).upper()
+    degrees = int(m.group(2))
+    minutes = float(m.group(3))
+    decimal = degrees + minutes / 60.0
+    if hemi in ("S", "W"):
+        decimal = -decimal
+    return decimal
 
 
 # ---------------------------------------------------------------------------
