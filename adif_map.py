@@ -541,6 +541,50 @@ def _classify_contacts(records: list, key_fn) -> dict:
     return status, counts
 
 
+def _build_overlay_qso_data(records: list, key_fn,
+                             mode_group_fn) -> tuple[dict, list, list]:
+    """
+    Build a compact indexed QSO data structure for dynamic overlay updates.
+
+    Returns:
+        data       — {entity_key: [[grp_idx, band_idx, confirmed_int], ...]}
+        grp_index  — list of mode group names  (index -> name)
+        band_index — list of band names        (index -> name)
+
+    Using integer indices instead of repeated strings cuts JSON size ~75%.
+    """
+    grp_list  = []
+    band_list = []
+    grp_map   = {}
+    band_map  = {}
+
+    def grp_idx(g):
+        if g not in grp_map:
+            grp_map[g] = len(grp_list)
+            grp_list.append(g)
+        return grp_map[g]
+
+    def band_idx(b):
+        if b not in band_map:
+            band_map[b] = len(band_list)
+            band_list.append(b)
+        return band_map[b]
+
+    data: dict[str, list] = {}
+    for r in records:
+        key = key_fn(r)
+        if not key:
+            continue
+        mode = r.get('MODE', '').upper()
+        band = r.get('BAND', 'unknown').lower()
+        conf = 1 if (r.get('LOTW_QSL_RCVD','').upper()=='Y' or
+                     r.get('QSLRCD','').upper()=='Y') else 0
+        grp  = mode_group_fn(mode)
+        data.setdefault(key, []).append([grp_idx(grp), band_idx(band), conf])
+
+    return data, grp_list, band_list
+
+
 # ---------------------------------------------------------------------------
 # Grid square overlay  (pure Python / GeoJSON)
 # ---------------------------------------------------------------------------
@@ -571,12 +615,12 @@ def _grid4_polygon(grid4: str) -> list:
     ]
 
 
-def build_grid_overlay(m, records: list) -> None:
+def build_grid_overlay(m, records: list, dynamic: bool = False,
+                       mode_group_fn=None) -> dict:
     """
     Add a grid-square choropleth layer to the map.
-    Only squares present in records are drawn:
-      orange = at least one confirmed QSO
-      yellow = worked but no confirmed QSO
+    When dynamic=True, embeds per-QSO data for JS recompute and returns
+    {'var_name': ..., 'data': ..., 'grp_index': ..., 'band_index': ...}.
     """
     colors = GRIDS_COLORS
     import json
@@ -588,7 +632,13 @@ def build_grid_overlay(m, records: list) -> None:
     status, counts = _classify_contacts(records, grid_key)
     if not status:
         print("  Grid overlay: no GRIDSQUARE data found in records — skipping.")
-        return
+        return {}
+
+    # Build dynamic QSO data if requested
+    dyn_data = grp_index = band_index = None
+    if dynamic and mode_group_fn:
+        dyn_data, grp_index, band_index = _build_overlay_qso_data(
+            records, grid_key, mode_group_fn)
 
     features = []
     for grid, state in status.items():
@@ -597,14 +647,16 @@ def build_grid_overlay(m, records: list) -> None:
         except Exception:
             continue
         n = counts.get(grid, 0)
+        props = {
+            'grid':    grid,
+            'key':     grid,
+            'status':  state,
+            'count':   n,
+            'tooltip': f"{grid} — {state} ({n} QSO{'s' if n != 1 else ''})",
+        }
         features.append({
             'type': 'Feature',
-            'properties': {
-                'grid':   grid,
-                'status': state,
-                'count':  n,
-                'tooltip': f"{grid} — {state} ({n} QSO{'s' if n != 1 else ''})",
-            },
+            'properties': props,
             'geometry': {'type': 'Polygon', 'coordinates': [ring]},
         })
 
@@ -619,17 +671,23 @@ def build_grid_overlay(m, records: list) -> None:
             'fillOpacity': 0.45,
         }
 
-    fg = folium.FeatureGroup(name='Overlay: Grid squares', show=True)
-    folium.GeoJson(
+    fg  = folium.FeatureGroup(name='Overlay: Grid squares', show=True)
+    gjl = folium.GeoJson(
         geojson,
         style_function=style_fn,
         tooltip=folium.GeoJsonTooltip(fields=['tooltip'], aliases=[''], labels=False),
-    ).add_to(fg)
+    )
+    gjl.add_to(fg)
     fg.add_to(m)
 
     confirmed_n = sum(1 for s in status.values() if s == 'confirmed')
     worked_n    = sum(1 for s in status.values() if s == 'worked')
     print(f"  Grid overlay: {confirmed_n} confirmed, {worked_n} worked-only squares.")
+
+    if dynamic:
+        return {'var_name': gjl.get_name(), 'data': dyn_data or {},
+                'grp_index': grp_index or [], 'band_index': band_index or []}
+    return {}
 
 
 
@@ -657,11 +715,12 @@ def _ca_prov_key(r: dict) -> str:
     return ''
 
 
-def build_states_overlay(m, records: list) -> None:
+def build_states_overlay(m, records: list, dynamic: bool = False,
+                         mode_group_fn=None) -> dict:
     """
     Add a US states + Canadian provinces choropleth layer.
     Reads ne_states.geojson cached by adif_setup.py.
-    Green = confirmed, amber = worked-unconfirmed.
+    When dynamic=True, embeds per-QSO data for JS recompute.
     """
     colors = STATES_COLORS
     import json
@@ -671,14 +730,14 @@ def build_states_overlay(m, records: list) -> None:
             "  States overlay: ne_states.geojson not found.\n"
             "  Run  python adif_setup.py  once to download boundary data."
         )
-        return
+        return {}
 
     # Load cached boundary file
     try:
         geojson = json.loads(_STATES_CACHE.read_text(encoding="utf-8"))
     except Exception as exc:
         print(f"  States overlay: could not read {_STATES_CACHE.name}: {exc}")
-        return
+        return {}
 
     # Build worked/confirmed lookup from filtered records
     us_status, us_counts = _classify_contacts(records, _us_state_key)
@@ -701,7 +760,7 @@ def build_states_overlay(m, records: list) -> None:
 
     if not lookup and not geojson.get('features'):
         print("  States overlay: no US/CA STATE data found — skipping.")
-        return
+        return {}
 
     def style_fn(feature):
         postal = (feature['properties'].get('postal') or '').upper()
@@ -738,9 +797,8 @@ def build_states_overlay(m, records: list) -> None:
             tip = f"{name} ({postal}) — not worked"
         return folium.Tooltip(tip)
 
-    fg = folium.FeatureGroup(name='Overlay: States & Provinces', show=True)
-
-    folium.GeoJson(
+    fg  = folium.FeatureGroup(name='Overlay: States & Provinces', show=True)
+    gjl = folium.GeoJson(
         geojson,
         style_function=style_fn,
         tooltip=folium.GeoJsonTooltip(
@@ -748,9 +806,19 @@ def build_states_overlay(m, records: list) -> None:
             aliases=['Code', 'Name'],
             localize=True,
         ),
-    ).add_to(fg)
-
+    )
+    gjl.add_to(fg)
     fg.add_to(m)
+
+    if dynamic:
+        dyn_data, grp_index, band_index = _build_overlay_qso_data(
+            records,
+            lambda r: _us_state_key(r) or _ca_prov_key(r),
+            mode_group_fn,
+        )
+        return {'var_name': gjl.get_name(), 'data': dyn_data,
+                'grp_index': grp_index, 'band_index': band_index}
+    return {}
 
 
 
@@ -778,11 +846,12 @@ def _cnty_key(r: dict) -> str:
     return f"{state.upper()},{name}"
 
 
-def build_counties_overlay(m, records: list) -> None:
+def build_counties_overlay(m, records: list, dynamic: bool = False,
+                           mode_group_fn=None) -> dict:
     """
     Add a US county choropleth layer.
     Reads us_counties.geojson cached by adif_setup.py.
-    Teal = confirmed, light blue = worked-unconfirmed,
+    When dynamic=True, embeds per-QSO data for JS recompute.
     faint gray outline = unworked (boundary visible but no fill).
     """
     colors = COUNTIES_COLORS
@@ -793,13 +862,13 @@ def build_counties_overlay(m, records: list) -> None:
             "  County overlay: us_counties.geojson not found.\n"
             "  Run  python adif_setup.py  to download boundary data."
         )
-        return
+        return {}
 
     try:
         geojson = json.loads(_COUNTIES_CACHE.read_text(encoding="utf-8"))
     except Exception as exc:
         print(f"  County overlay: could not read {_COUNTIES_CACHE.name}: {exc}")
-        return
+        return {}
 
     status, counts = _classify_contacts(records, _cnty_key)
     status.pop('', None);  counts.pop('', None)
@@ -828,9 +897,8 @@ def build_counties_overlay(m, records: list) -> None:
             'fillOpacity': 0.55,
         }
 
-    fg = folium.FeatureGroup(name='Overlay: Counties', show=True)
-
-    folium.GeoJson(
+    fg  = folium.FeatureGroup(name='Overlay: Counties', show=True)
+    gjl = folium.GeoJson(
         geojson,
         style_function=style_fn,
         tooltip=folium.GeoJsonTooltip(
@@ -838,9 +906,16 @@ def build_counties_overlay(m, records: list) -> None:
             aliases=['County', 'State', 'ADIF key'],
             localize=True,
         ),
-    ).add_to(fg)
-
+    )
+    gjl.add_to(fg)
     fg.add_to(m)
+
+    if dynamic:
+        dyn_data, grp_index, band_index = _build_overlay_qso_data(
+            records, _cnty_key, mode_group_fn)
+        return {'var_name': gjl.get_name(), 'data': dyn_data,
+                'grp_index': grp_index, 'band_index': band_index}
+    return {}
 
 
 
@@ -850,15 +925,23 @@ def build_counties_overlay(m, records: list) -> None:
 
 def inject_toggle_panel(m, filtered_records: list, layer_meta: dict) -> None:
     """
-    Inject a collapsible Modes filter panel (top-left, starts collapsed).
-    Calls .addTo(map) / .remove() on real Leaflet FeatureGroup objects —
-    same mechanism as the native layer control, so it reliably works.
+    Inject a collapsible filter panel (top-left, starts collapsed).
+
+    Contains:
+      - Modes section: toggles whole mode-group FeatureGroup layers on/off
+      - Bands section: filters overlay choropleth recompute (not dot visibility)
+
+    When overlay_meta is present in layer_meta, mode AND band toggles also
+    call recomputeOverlays() which updates GeoJSON fill colors dynamically.
     """
     import json
 
-    map_var       = m.get_name()
-    mode_fg_names = layer_meta.get("mode_fg_names", {})
-    mode_fg_modes = layer_meta.get("mode_fg_modes", {})
+    map_var        = m.get_name()
+    mode_fg_names  = layer_meta.get("mode_fg_names", {})
+    mode_fg_modes  = layer_meta.get("mode_fg_modes", {})
+    overlay_meta   = layer_meta.get("overlay_meta", {})
+    bands_present  = layer_meta.get("bands_present_sorted",
+                                    layer_meta.get("bands_present", []))
 
     if not mode_fg_names:
         return
@@ -866,6 +949,50 @@ def inject_toggle_panel(m, filtered_records: list, layer_meta: dict) -> None:
     mode_fg_names_js = json.dumps(mode_fg_names)
     mode_fg_modes_js = json.dumps(mode_fg_modes)
     active_groups    = json.dumps(sorted(mode_fg_names.keys()))
+    bands_js         = json.dumps(bands_present)
+
+    # Serialize overlay dynamic data
+    # overlay_dyn: {type: {varName, data, grpIndex, bandIndex}}
+    overlay_dyn = {}
+    for ov_type, meta in overlay_meta.items():
+        overlay_dyn[ov_type] = {
+            'varName':   meta.get('var_name', ''),
+            'data':      meta.get('data', {}),
+            'grpIndex':  meta.get('grp_index', []),
+            'bandIndex': meta.get('band_index', []),
+        }
+    overlay_dyn_js = json.dumps(overlay_dyn)
+
+    # Theme colors for JS recompute
+    colors_js = json.dumps({
+        'states': {
+            'confirmed': STATES_COLORS.get('confirmed', '#2ecc71'),
+            'worked':    STATES_COLORS.get('worked',    '#f39c12'),
+            'border_confirmed': STATES_COLORS.get('border_confirmed', '#1a7a45'),
+            'border_worked':    STATES_COLORS.get('border_worked',    '#b8860b'),
+            'confirmed_weight': STATES_COLORS.get('confirmed_weight', 2.0),
+            'worked_weight':    STATES_COLORS.get('worked_weight',    2.0),
+            'unworked_fill':    STATES_COLORS.get('unworked_fill',    '#ffffff'),
+            'unworked_border':  STATES_COLORS.get('unworked_border',  '#666666'),
+            'unworked_weight':  STATES_COLORS.get('unworked_weight',  0.8),
+        },
+        'counties': {
+            'confirmed': COUNTIES_COLORS.get('confirmed', '#1a8a4a'),
+            'worked':    COUNTIES_COLORS.get('worked',    '#c0720a'),
+            'border_confirmed': COUNTIES_COLORS.get('border_confirmed', '#0d4d28'),
+            'border_worked':    COUNTIES_COLORS.get('border_worked',    '#7d4e07'),
+            'unworked_fill':    COUNTIES_COLORS.get('unworked_fill',    '#ffffff'),
+            'unworked_border':  COUNTIES_COLORS.get('unworked_border',  '#888888'),
+            'unworked_weight':  COUNTIES_COLORS.get('unworked_weight',  0.5),
+        },
+        'grids': {
+            'confirmed': GRIDS_COLORS.get('confirmed', '#e67e22'),
+            'worked':    GRIDS_COLORS.get('worked',    '#f7dc6f'),
+        },
+    })
+
+    band_colors_js = json.dumps({b: BAND_COLORS.get(b, DEFAULT_COLOR)
+                                  for b in bands_present})
 
     panel_html = f"""
 <style>
@@ -874,7 +1001,7 @@ def inject_toggle_panel(m, filtered_records: list, layer_meta: dict) -> None:
     background:rgba(255,255,255,0.95); border:1px solid #aaa;
     border-radius:8px; box-shadow:2px 2px 8px rgba(0,0,0,0.25);
     font-family:sans-serif; font-size:12px;
-    min-width:155px; max-width:210px;
+    min-width:160px; max-width:220px;
     user-select:none; cursor:default;
 }}
 #adif-fp .pt {{
@@ -884,25 +1011,31 @@ def inject_toggle_panel(m, filtered_records: list, layer_meta: dict) -> None:
     cursor:pointer; color:#333;
 }}
 #adif-fp .sh {{
-    padding:5px 10px 3px; font-weight:bold; color:#555;
-    cursor:pointer; display:flex; justify-content:space-between;
-    align-items:center; border-top:1px solid #eee;
-    font-size:11px; text-transform:uppercase; letter-spacing:0.05em;
+    padding:5px 10px 3px; font-weight:bold; color:#555; cursor:pointer;
+    display:flex; justify-content:space-between; align-items:center;
+    border-top:1px solid #eee; font-size:11px;
+    text-transform:uppercase; letter-spacing:0.05em;
 }}
 #adif-fp .sh:hover {{ background:#f5f5f5; }}
 #adif-fp .sb {{ padding:2px 8px 6px 10px; }}
+#adif-fp .note {{ padding:2px 10px 4px; font-size:10px; color:#999; font-style:italic; }}
 #adif-fp .tr {{ display:flex; align-items:center; gap:6px; padding:2px 0; }}
 #adif-fp .tr:hover {{ background:#f8f8f8; border-radius:3px; padding:2px 2px; margin:0 -2px; }}
+#adif-fp .sw {{
+    display:inline-block; width:10px; height:10px; border-radius:50%;
+    border:1px solid rgba(0,0,0,0.2); flex-shrink:0;
+}}
 #adif-fp .chv {{ font-size:10px; color:#999; transition:transform 0.15s; display:inline-block; }}
 #adif-fp .chv.col {{ transform:rotate(-90deg); }}
 #adif-fp .sa {{ font-size:10px; color:#888; cursor:pointer; padding:1px 4px; border-radius:3px; }}
 #adif-fp .sa:hover {{ background:#eee; color:#333; }}
 </style>
 <div id="adif-fp">
-  <div class="pt" id="adif-ptitle">Modes <span id="adif-pchev">▶</span></div>
+  <div class="pt" id="adif-ptitle">Filters <span id="adif-pchev">▶</span></div>
   <div id="adif-pbody" style="display:none">
+
     <div class="sh" id="adif-mhead">
-      Groups
+      Modes
       <span>
         <span class="sa" id="adif-mall">all</span>
         <span class="sa" id="adif-mnone">none</span>
@@ -910,6 +1043,18 @@ def inject_toggle_panel(m, filtered_records: list, layer_meta: dict) -> None:
       </span>
     </div>
     <div class="sb" id="adif-modes-body"></div>
+
+    <div class="sh" id="adif-bhead">
+      Bands
+      <span>
+        <span class="sa" id="adif-ball">all</span>
+        <span class="sa" id="adif-bnone">none</span>
+        <span id="adif-bchev" class="chv">▼</span>
+      </span>
+    </div>
+    <div class="sb" id="adif-bands-body"></div>
+    <div class="note" id="adif-band-note">Affects overlay colors only</div>
+
   </div>
 </div>
 <script>
@@ -918,6 +1063,10 @@ setTimeout(function() {{
     var modeFgNames  = {mode_fg_names_js};
     var modeFgModes  = {mode_fg_modes_js};
     var activeGroups = {active_groups};
+    var bandsPresent = {bands_js};
+    var bandColors   = {band_colors_js};
+    var overlayDyn   = {overlay_dyn_js};
+    var themeColors  = {colors_js};
 
     function getLayer(n) {{ return window[n] || null; }}
 
@@ -925,7 +1074,9 @@ setTimeout(function() {{
     activeGroups.forEach(function(g) {{
         (modeFgModes[g]||[]).forEach(function(m) {{ activeModes.add(m); }});
     }});
+    var activeBands = new Set(bandsPresent);
 
+    // ── Build mode checkboxes ──────────────────────────────────
     var modesBody = document.getElementById('adif-modes-body');
     if (modesBody) {{
         activeGroups.forEach(function(grp) {{
@@ -944,7 +1095,7 @@ setTimeout(function() {{
             if (modes.length > 1) {{
                 modes.forEach(function(mode) {{
                     var mRow = document.createElement('div');
-                    mRow.className = 'tr'; mRow.style.paddingLeft = '16px';
+                    mRow.className='tr'; mRow.style.paddingLeft='16px';
                     var mcb = document.createElement('input');
                     mcb.type='checkbox'; mcb.id='cb-mode-'+mode; mcb.checked=true;
                     mcb.addEventListener('change', function() {{ adifModeToggle(grp, mode, this.checked); }});
@@ -958,16 +1109,115 @@ setTimeout(function() {{
         }});
     }}
 
+    // ── Build band checkboxes ──────────────────────────────────
+    var bandsBody = document.getElementById('adif-bands-body');
+    if (bandsBody) {{
+        bandsPresent.forEach(function(band) {{
+            var color = bandColors[band] || '#888';
+            var row   = document.createElement('div');
+            row.className = 'tr';
+            var cb = document.createElement('input');
+            cb.type='checkbox'; cb.id='cb-band-'+band; cb.checked=true;
+            cb.addEventListener('change', function() {{ adifBandToggle(band, this.checked); }});
+            var sw = document.createElement('span');
+            sw.className='sw'; sw.style.background=color;
+            var lb = document.createElement('label');
+            lb.htmlFor='cb-band-'+band; lb.textContent=band;
+            lb.style.cursor='pointer';
+            row.appendChild(cb); row.appendChild(sw); row.appendChild(lb);
+            bandsBody.appendChild(row);
+        }});
+    }}
+
+    // ── Overlay recompute ──────────────────────────────────────
+    function computeStatus(qsos) {{
+        // qsos: array of [grpIdx, bandIdx, confirmed]
+        // Returns 'confirmed'|'worked'|null based on active modes+bands
+        var hasWorked = false, hasConfirmed = false;
+        for (var i=0; i<qsos.length; i++) {{
+            var q = qsos[i];
+            var grpName  = overlayDyn[Object.keys(overlayDyn)[0]]
+                            ? null : null; // resolved per-overlay below
+            var confirmed = q[2];
+            // We store indices per overlay — handled in recomputeOverlay
+            if (confirmed) hasConfirmed = true; else hasWorked = true;
+        }}
+        if (hasConfirmed) return 'confirmed';
+        if (hasWorked)    return 'worked';
+        return null;
+    }}
+
+    function computeStatus(qsos, grpIdx, bndIdx) {{
+        var hasConf = false, hasWork = false;
+        for (var i=0; i<qsos.length; i++) {{
+            var q    = qsos[i];
+            var grp  = grpIdx[q[0]];
+            var band = bndIdx[q[1]];
+            var conf = q[2];
+            var gcb  = document.getElementById('cb-mgrp-'+grp);
+            if (!gcb || !gcb.checked) continue;
+            if (!activeBands.has(band)) continue;
+            if (conf) hasConf = true; else hasWork = true;
+        }}
+        if (hasConf) return 'confirmed';
+        if (hasWork) return 'worked';
+        return null;
+    }}
+
+    function styleForStatus(status, tc) {{
+        if (status === 'confirmed') return {{
+            fillColor: tc.confirmed, color: tc.border_confirmed || tc.confirmed,
+            weight: tc.confirmed_weight || 2.0, fillOpacity: 0.45,
+        }};
+        if (status === 'worked') return {{
+            fillColor: tc.worked, color: tc.border_worked || tc.worked,
+            weight: tc.worked_weight || 2.0, fillOpacity: 0.45,
+        }};
+        return {{
+            fillColor: tc.unworked_fill || '#ffffff',
+            color: tc.unworked_border || '#aaaaaa',
+            weight: tc.unworked_weight || 0.5, fillOpacity: 0.0,
+        }};
+    }}
+
+    function recomputeOverlay(ovType) {{
+        var ov = overlayDyn[ovType];
+        if (!ov || !ov.varName) return;
+        var layer = getLayer(ov.varName);
+        if (!layer || !layer.eachLayer) return;
+        var grpIdx = ov.grpIndex;
+        var bndIdx = ov.bandIndex;
+        var data   = ov.data;
+        var tc     = themeColors[ovType] || themeColors['states'];
+
+        layer.eachLayer(function(path) {{
+            if (!path.feature || !path.feature.properties) return;
+            var props  = path.feature.properties;
+            var key    = props.key || props.postal || props.adif_key || props.grid || '';
+            var status = computeStatus(data[key] || [], grpIdx, bndIdx);
+            path.setStyle(styleForStatus(status, tc));
+        }});
+    }}
+
+    function recomputeAllOverlays() {{
+        Object.keys(overlayDyn).forEach(function(ovType) {{
+            recomputeOverlay(ovType);
+        }});
+    }}
+
+    // ── Toggle handlers ────────────────────────────────────────
     window.adifGrpToggle = function(grp, checked) {{
         var layer = getLayer(modeFgNames[grp]);
-        if (!layer) return;
-        if (checked) {{ if (!mapObj.hasLayer(layer)) layer.addTo(mapObj); }}
-        else         {{ if (mapObj.hasLayer(layer))  layer.remove(); }}
+        if (layer) {{
+            if (checked) {{ if (!mapObj.hasLayer(layer)) layer.addTo(mapObj); }}
+            else         {{ if (mapObj.hasLayer(layer))  layer.remove(); }}
+        }}
         (modeFgModes[grp]||[]).forEach(function(m) {{
             if (checked) activeModes.add(m); else activeModes.delete(m);
             var cb = document.getElementById('cb-mode-'+m);
             if (cb) cb.checked = checked;
         }});
+        recomputeAllOverlays();
     }};
 
     window.adifModeToggle = function(grp, mode, checked) {{
@@ -976,12 +1226,19 @@ setTimeout(function() {{
         var gcb = document.getElementById('cb-mgrp-'+grp);
         if (gcb) gcb.checked = anyOn;
         var layer = getLayer(modeFgNames[grp]);
-        if (!layer) return;
-        if (anyOn) {{ if (!mapObj.hasLayer(layer)) layer.addTo(mapObj); }}
-        else       {{ if (mapObj.hasLayer(layer))  layer.remove(); }}
+        if (layer) {{
+            if (anyOn) {{ if (!mapObj.hasLayer(layer)) layer.addTo(mapObj); }}
+            else       {{ if (mapObj.hasLayer(layer))  layer.remove(); }}
+        }}
+        recomputeAllOverlays();
     }};
 
-    window.adifSelectAll = function(checked) {{
+    window.adifBandToggle = function(band, checked) {{
+        if (checked) activeBands.add(band); else activeBands.delete(band);
+        recomputeAllOverlays();
+    }};
+
+    window.adifSelectModes = function(checked) {{
         activeGroups.forEach(function(grp) {{
             var gcb = document.getElementById('cb-mgrp-'+grp);
             if (gcb) gcb.checked = checked;
@@ -989,6 +1246,16 @@ setTimeout(function() {{
         }});
     }};
 
+    window.adifSelectBands = function(checked) {{
+        bandsPresent.forEach(function(b) {{
+            if (checked) activeBands.add(b); else activeBands.delete(b);
+            var cb = document.getElementById('cb-band-'+b);
+            if (cb) cb.checked = checked;
+        }});
+        recomputeAllOverlays();
+    }};
+
+    // ── Collapse wiring ────────────────────────────────────────
     function wireClick(id, fn) {{
         var el = document.getElementById(id);
         if (el) el.addEventListener('click', fn);
@@ -1001,23 +1268,35 @@ setTimeout(function() {{
         body.style.display = h ? '' : 'none';
         if (chev) chev.textContent = h ? '▼' : '▶';
     }});
-    wireClick('adif-mhead', function(e) {{
-        if (e.target.classList.contains('sa')) return;
-        var body = document.getElementById('adif-modes-body');
-        var chev = document.getElementById('adif-mchev');
-        if (!body) return;
-        var h = body.style.display === 'none';
-        body.style.display = h ? '' : 'none';
-        if (chev) chev.classList.toggle('col', !h);
-    }});
-    wireClick('adif-mall',  function(e) {{ e.stopPropagation(); adifSelectAll(true);  }});
-    wireClick('adif-mnone', function(e) {{ e.stopPropagation(); adifSelectAll(false); }});
+    function wireSection(bodyId, chevId, headId) {{
+        wireClick(headId, function(e) {{
+            if (e.target.classList.contains('sa')) return;
+            var body = document.getElementById(bodyId);
+            var chev = document.getElementById(chevId);
+            if (!body) return;
+            var h = body.style.display === 'none';
+            body.style.display = h ? '' : 'none';
+            if (chev) chev.classList.toggle('col', !h);
+        }});
+    }}
+    wireSection('adif-modes-body', 'adif-mchev', 'adif-mhead');
+    wireSection('adif-bands-body', 'adif-bchev', 'adif-bhead');
+    wireClick('adif-mall',  function(e) {{ e.stopPropagation(); adifSelectModes(true);  }});
+    wireClick('adif-mnone', function(e) {{ e.stopPropagation(); adifSelectModes(false); }});
+    wireClick('adif-ball',  function(e) {{ e.stopPropagation(); adifSelectBands(true);  }});
+    wireClick('adif-bnone', function(e) {{ e.stopPropagation(); adifSelectBands(false); }});
 
+    // Hide band section note if no overlays are active
+    var note = document.getElementById('adif-band-note');
+    if (note && Object.keys(overlayDyn).length === 0) note.style.display = 'none';
+
+    // Wire Leaflet event isolation
     var fp = document.getElementById('adif-fp');
     if (fp && window.L) {{
         L.DomEvent.disableClickPropagation(fp);
         L.DomEvent.disableScrollPropagation(fp);
     }}
+
 }}, 300);
 </script>
 """
@@ -1202,22 +1481,44 @@ def main():
     # Collect band groups that were actually used (for legend)
     used_bands = {r.get('BAND', 'unknown').lower() for r in filtered if resolve_coords(r)}
     add_legend(m, {b: None for b in used_bands})
-    if args.show_filters:
-        inject_toggle_panel(m, filtered, layer_meta)
+    # Build mode_group_fn from MODE_GROUPS for dynamic overlay data
+    catch_all_lbl = next((g[0] for g in MODE_GROUPS if g[1] is None), "Other")
+    def _mgfn(mode: str) -> str:
+        for lbl, members in MODE_GROUPS:
+            if members is not None and mode.upper() in members:
+                return lbl
+        return catch_all_lbl
 
-    # Overlays
+    # Overlays — pass dynamic=True when mode filter panel is active
+    overlay_meta = {}   # overlay type -> {var_name, data, grp_index, band_index}
     overlays = [o.strip().lower() for o in (args.overlay or "").split(",") if o.strip()]
     if "states" in overlays:
         print("Building states/provinces overlay ...")
-        build_states_overlay(m, filtered)
+        result = build_states_overlay(m, filtered,
+                                      dynamic=args.show_filters, mode_group_fn=_mgfn)
+        if result:
+            overlay_meta['states'] = result
     if "counties" in overlays:
         print("Building county overlay ...")
-        build_counties_overlay(m, filtered)
+        result = build_counties_overlay(m, filtered,
+                                        dynamic=args.show_filters, mode_group_fn=_mgfn)
+        if result:
+            overlay_meta['counties'] = result
     if "grids" in overlays:
         print("Building grid square overlay ...")
-        build_grid_overlay(m, filtered)
+        result = build_grid_overlay(m, filtered,
+                                    dynamic=args.show_filters, mode_group_fn=_mgfn)
+        if result:
+            overlay_meta['grids'] = result
     if overlays:
         add_overlay_legend(m, overlays)
+
+    # Inject mode filter panel (must come after overlays so var names exist)
+    if args.show_filters:
+        layer_meta['overlay_meta'] = overlay_meta
+        layer_meta['bands_present_sorted'] = sorted(
+            {r.get('BAND','unknown').lower() for r in filtered})
+        inject_toggle_panel(m, filtered, layer_meta)
 
     # Single LayerControl added after all layers (including overlays) are built
     folium.LayerControl(collapsed=False).add_to(m)
