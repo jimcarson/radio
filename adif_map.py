@@ -237,7 +237,7 @@ def _resolve_my_coords_for_record(record: dict):
 # ---------------------------------------------------------------------------
 # Great-circle arc interpolation
 # ---------------------------------------------------------------------------
-def _gc_points(p1, p2, n=60):
+def _gc_points(p1, p2, n=32):
     """Return n+1 (lat,lon) points along the great-circle between p1 and p2."""
     lat1, lon1 = math.radians(p1[0]), math.radians(p1[1])
     lat2, lon2 = math.radians(p2[0]), math.radians(p2[1])
@@ -333,7 +333,62 @@ BAND_GROUPS = [
 ]
 
 
-def build_map(my_coords, records, show_arcs: bool):
+# ---------------------------------------------------------------------------
+# Arc decimation
+# ---------------------------------------------------------------------------
+
+def _select_arcs(records: list, arc_max: int = 1000,
+                 arc_cell_max: int = 3) -> list:
+    """
+    Return a decimated list of records to draw as arcs.
+
+    Strategy:
+      1. Deduplicate by callsign — one arc per unique contact regardless of
+         how many bands/modes were worked.
+      2. Assign each contact to a 5x5 degree geographic cell based on its
+         coordinates.
+      3. Prioritise rare DX: fill cells with the fewest contacts first so
+         isolated grid cells always get an arc before dense clusters.
+      4. Apply per-cell cap (arc_cell_max) then global cap (arc_max).
+    """
+    # Step 1: deduplicate by callsign, keep first record seen
+    seen_calls: set = set()
+    unique: list = []
+    for r in records:
+        call = r.get('CALL', '').upper().strip()
+        if not call or call in seen_calls:
+            continue
+        coords = resolve_coords(r)
+        if coords is None:
+            continue
+        seen_calls.add(call)
+        unique.append((r, coords))
+
+    if not unique:
+        return []
+
+    # Step 2: assign to 5x5 degree cells
+    cell_map: dict = {}
+    for r, coords in unique:
+        cell = (int(coords[1] // 5), int(coords[0] // 5))
+        cell_map.setdefault(cell, []).append(r)
+
+    # Step 3: sort cells by population — rarest first (rare DX gets priority)
+    cells_by_rarity = sorted(cell_map.items(), key=lambda kv: len(kv[1]))
+
+    # Step 4: select up to arc_cell_max per cell, arc_max total
+    selected = []
+    for _cell, entries in cells_by_rarity:
+        for r in entries[:arc_cell_max]:
+            selected.append(r)
+            if len(selected) >= arc_max:
+                return selected
+
+    return selected
+
+
+def build_map(my_coords, records, show_arcs: bool,
+              arc_max: int = 1000, arc_cell_max: int = 3):
     from folium.plugins import MarkerCluster
 
     m = folium.Map(
@@ -489,19 +544,37 @@ def build_map(my_coords, records, show_arcs: bool):
         marker.add_to(mode_clusters[grp])
         band_groups[band] = None
 
-        if show_arcs:
-            arc_pts = _gc_points(origin, coords)
+    for fg in mode_fgs.values():
+        fg.add_to(m)
+
+    # Draw decimated arcs after markers so they don't block tooltips
+    if show_arcs:
+        arc_records = _select_arcs(records, arc_max=arc_max,
+                                   arc_cell_max=arc_cell_max)
+        arc_fg = folium.FeatureGroup(name="Arcs", show=True)
+        for r in arc_records:
+            coords = resolve_coords(r)
+            if coords is None:
+                continue
+            origin = _resolve_my_coords_for_record(r) or my_coords
+            band   = r.get('BAND', 'unknown').lower()
+            mode   = r.get('MODE', '').upper()
+            call   = r.get('CALL', '?')
+            date   = r.get('QSO_DATE', '')
+            color  = BAND_COLORS.get(band, DEFAULT_COLOR)
+            conf   = "✓ confirmed" if is_confirmed(r) else ""
             folium.PolyLine(
-                locations=arc_pts,
+                locations=_gc_points(origin, coords),
                 color=color,
                 weight=1,
                 opacity=0.45,
-                tooltip=tooltip_text,
+                tooltip=f"{call} | {band} {mode} | {date} {conf}",
                 dash_array="6 4",
-            ).add_to(m)
-
-    for fg in mode_fgs.values():
-        fg.add_to(m)
+            ).add_to(arc_fg)
+        arc_fg.add_to(m)
+        print(f"  Arcs: {len(arc_records)} drawn from "
+              f"{len({r.get('CALL','') for r in records})} unique contacts "
+              f"({len(records)} QSOs total)")
 
     if skipped:
         print(f"  Note: {skipped} QSO(s) skipped — no usable coordinates found.")
@@ -1443,6 +1516,10 @@ def main():
                         help="Only show confirmed QSOs (LoTW or QSL received)")
     parser.add_argument("--show-arcs", dest="show_arcs", action="store_true",
                         help="Draw great-circle arc lines (default: off — slow on large logs)")
+    parser.add_argument("--arc-max", dest="arc_max", type=int, default=1000,
+                        help="Maximum total arcs to draw when --show-arcs is active (default: 1000)")
+    parser.add_argument("--arc-cell-max", dest="arc_cell_max", type=int, default=3,
+                        help="Maximum arcs per 5°x5° geographic cell — limits dense clusters (default: 3)")
     parser.add_argument("--cluster-by-band", dest="cluster_by_band", action="store_true",
                         help="Separate cluster bubble per band, toggleable via layer control (default: all bands together)")
     parser.add_argument("--show-filters", dest="show_filters", action="store_true",
@@ -1518,7 +1595,9 @@ def main():
 
     print("Building map ...")
     m, plotted, layer_meta = build_map(my_coords, filtered,
-                                       show_arcs=args.show_arcs)
+                                       show_arcs=args.show_arcs,
+                                       arc_max=args.arc_max,
+                                       arc_cell_max=args.arc_cell_max)
     # Collect band groups that were actually used (for legend)
     used_bands = {r.get('BAND', 'unknown').lower() for r in filtered if resolve_coords(r)}
     add_legend(m, {b: None for b in used_bands})
