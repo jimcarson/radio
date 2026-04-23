@@ -41,8 +41,10 @@ overlay:
   states:
     confirmed:        "#2ecc71"   # medium green fill
     worked:           "#f39c12"   # amber fill
-    border_confirmed: "#1a7a45"   # darker green border
-    border_worked:    "#b8860b"   # darker amber border
+    #border_confirmed: "#1a7a45"   # darker green border
+    #border_worked:    "#b8860b"   # darker amber border
+    border_confirmed: "#000000"   # black
+    border_worked:    "#000000"   # black
     confirmed_weight: 2.0         # border stroke width — confirmed states
     worked_weight:    2.0         # border stroke width — worked states
     unworked_fill:    "#ffffff"   # fill for unworked states
