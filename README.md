@@ -1,20 +1,16 @@
-# QRZ Logbook Tools
+# Mapping and QRZ Logbook Tools
 
 Logging QSLs accurately is [surprisingly complicated](https://wt8p.com/logging-amateur-radio-contacts-accurately-is-complicated/).  This group of programs attempts to reconcile data discrepancies between your [QRZ Logbook](https://logbook.qrz.com) and between QRZ and [LoTW (Logbook of the World)](https://lotw.arrl.org).  It will only update the QRZ side.
 
-## Use cases ##
+## Use Cases
 
-1) QRZ identifies cases where you and the other party logged different values for Grid Square, State, and County — but provides no bulk-correction mechanism.  Correcting can be done from the browser, but requires 8-13 clicks *for each record*.  As someone who accumulates 40 of these a month, but cannot let it go, I've been hoping for a better way.  Here it is.
+1. **QRZ discrepancy correction** — QRZ identifies cases where you and the other party logged different values for Grid Square, State, and County, but provides no bulk-correction mechanism. Correcting via the browser requires 8–13 clicks per record. These scripts automate that via the QRZ API.
 
-2) If you do portable operations, the veracity of QRZ data can be affected by how you upload logs.   For example, when I do a POTA, I will define a specific station location for each park, using its proper grid, county, state.  If I upload to LoTW first, then use QRZ's import from LoTW, it's *mostly correct*.  QRZ still infers the location from your QRZ, causing errors in distance.
+2. **Portable operation cleanup** — When logging from a park or other portable site, apps may capture your grid correctly but upstream uploads can overwrite station fields with your home location. The `MY_` field correction workflow fixes this in bulk.
 
-Because LoTW can often incur processing delays, I've often forgotten and uploaded to QRZ, too.  When data is subsequently imported from to QRZ from LoTW, it does not update these fields.  Editing my records is very tedious.
+3. **Contact mapping** — Plot your log on an interactive browser map, with overlays for worked/confirmed states, counties, and grid squares. Originally written to visualize a two-week Iceland POTA trip.
 
-These scripts provides a mechanism of bulk-correcting your own data in QRZ via the QRZ API.  They will require an API key (which you can get with a premium QRZ membership).
-
-3) Two years ago, I spent a couple of weeks driving around Iceland, activating 11 parks, and my wanderlust wants to see the contacts on a map.  
-
-USE AT YOUR OWN RISK.  These are presented AS IS and without any warranty.  
+> **USE AT YOUR OWN RISK.** These are presented AS IS and without any warranty.
 
 ---
 
@@ -23,19 +19,19 @@ USE AT YOUR OWN RISK.  These are presented AS IS and without any warranty.
 | File | Purpose |
 |---|---|
 | `qrz_common.py` | Shared library — ADIF parsing, QRZ API client, field converters, Maidenhead grid utilities, config loading |
-| `resolve_qrz_discrepancies.py` | Corrects Grid, State, and County discrepancies reported by QRZ's Awards pages as well as allowing bulk correction of your own records. |
-| `adif_extract.py` | Extracts QSOs from a QRZ ADIF export to an inspection CSV; supports date-range and single-date filtering. Produces a ready-to-edit file that feeds directly into `resolve_qrz_discrepancies.py`. |
+| `resolve_qrz_discrepancies.py` | Corrects Grid, State, and County discrepancies reported by QRZ's Awards pages; also supports bulk correction of your own records |
+| `adif_extract.py` | Extracts QSOs from a QRZ ADIF export to an inspection CSV; supports date-range and single-date filtering; produces a ready-to-edit file that feeds directly into `resolve_qrz_discrepancies.py` |
 | `adif_setup.py` | Re-downloads and refreshes the boundary files (`ne_states.geojson`, `us_counties.geojson`). Not needed for typical use since both files are included in the repo. Run if you want to update to newer source data. |
-| `adif_map.py` | Plots an ADIF file on a browser-based map. Your activating location(s) are shown. Filter by band, mode, date, or confirmed status. Optional overlays show worked/confirmed grid squares, US states + Canadian provinces, and US counties. In-browser collapsible band/mode toggles. Supports color themes via YAML. |
+| `adif_map.py` | Plots an ADIF file on a browser-based interactive map. Filter by band, mode, date, or confirmed status. Optional overlays show worked/confirmed grid squares, US states + Canadian provinces, and US counties. Supports color themes via YAML. |
 | `reconcile_adif.py` | Compares LoTW and QRZ ADIF exports and optionally pushes corrections to QRZ |
 | `sample_corrections.csv` | Annotated sample CSV covering all supported `field` keywords — copy and edit for your own use |
 | `requirements.txt` | Pinned dependency list — `pip install -r requirements.txt` |
 | `sample.cfg` | Sample per-field rules configuration file for `reconcile_adif.py` — copy to `<CALLSIGN>.cfg` and edit |
-| `theme_default.yaml` | Default color theme for `adif_map.py` — copy to customize band/overlay colors |
-| `ne_states.geojson` | US + Canada state/province boundaries (Natural Earth 50m, public domain). Included in the repo — no download needed for typical use. Refresh with `adif_setup.py` if needed. |
-| `us_counties.geojson` | US county boundaries (Census TIGER 20m, public domain). Included in the repo — no download needed for typical use. Refresh with `adif_setup.py` if needed. |
+| `theme_default.yaml` | Default color theme for `adif_map.py` — copy to customize band/overlay colors and map centering |
+| `ne_states.geojson` | US + Canada state/province boundaries (Natural Earth 50m, public domain). Included in the repo — refresh with `adif_setup.py` if needed. |
+| `us_counties.geojson` | US county boundaries (Census TIGER 20m, public domain). Included in the repo — refresh with `adif_setup.py` if needed. |
 
-All files must be in the same directory. `qrz_common.py` is not run directly. `adif_map.py` imports from `qrz_common.py` for ADIF parsing, grid conversion, and date normalisation. `ne_states.geojson` and `us_counties.geojson` are included in the repo (public domain data — Natural Earth and US Census Bureau respectively) so `--overlay states` and `--overlay counties` work out of the box after cloning. Run `adif_setup.py` only if you want to refresh the boundary data from the original sources.
+All files must be in the same directory. `qrz_common.py` is not run directly — it is imported by all other scripts. `ne_states.geojson` and `us_counties.geojson` are included so `--overlay states` and `--overlay counties` work out of the box after cloning.
 
 ---
 
@@ -47,15 +43,13 @@ pip install -r requirements.txt
 pip install pandas openpyxl requests folium pyyaml pyshp
 ```
 
-Python 3.10 or later is recommended.  A requirements.txt file with instructions on creating a custom environment is provided.
-
-Library versions are intentionally conservative — for example, pandas 3.x is current but we only require 1.5+. The full list is in `requirements.txt`.
+Python 3.10 or later is recommended. Library versions are intentionally conservative — for example, pandas 3.x is current but we only require 1.5+. The full list is in `requirements.txt`.
 
 ---
 
 ## Callsign File Naming
 
-The QRZ API tools (`resolve_qrz_discrepancies.py` and `reconcile_adif.py`) use files named after your callsign (API key file, config file). Because portable callsigns can contain a `/` which is not valid in filenames, replace `/` with `_`.  For example:
+The QRZ API tools use files named after your callsign (API key file, config file). Because portable callsigns can contain a `/` which is not valid in filenames, replace `/` with `_`:
 
 | Callsign | Key file | Config file |
 |---|---|---|
@@ -67,7 +61,7 @@ The QRZ API tools (`resolve_qrz_discrepancies.py` and `reconcile_adif.py`) use f
 
 ## API Key Setup
 
-Create a file named `<CALLSIGN>.key` in the working directory containing your QRZ API key on a single line.  If your call sign has a slant, e.g., TF/WT8P, replace that with an underscore, e.g., TF_WT8P.key.  The key will be of the format:
+Create a file named `<CALLSIGN>.key` in the working directory containing your QRZ API key on a single line:
 
 ```
 abcd-1234-efcd-5678
@@ -79,584 +73,24 @@ Your API key is found in your QRZ Logbook under **Settings → API Access Key**.
 
 ---
 
-## `resolve_qrz_discrepancies.py`
+## Quick Reference
 
-Reads the discrepancy report exported from QRZ's Awards pages and applies the other party's values to your QRZ records via the API. Works on both unconfirmed records and confirmed/award-locked records.
-
-It can also be used to bulk update your own records.
-
-> **Dry-run mode is the default.** No changes are written to QRZ unless you pass `--update` explicitly. Always review the output CSV before running with `--update`.
-
-### Quick Start
-
-**1. Export from QRZ**
-
-- **ADIF export:** Logbook → Settings → Export. Wait, then click Settings again to refresh. Save the `.adi` file.
-
-**2. Export discrepancy reports from QRZ Awards**
-
-QRZ does not provide a bulk export for all discrepancy types at once — you visit each Awards page separately:
-
-    Logbook → Awards → [Your Callsign] → Grid Squares Award → (copy table or use Export)
-    Logbook → Awards → [Your Callsign] → United States Counties Award → (copy table or use Export)
-    Logbook → Awards → [Your Callsign] → United States States Award → (copy table or use Export)
-
-Paste each table into a separate sheet (`Grids`, `County`, `State`) in an Excel workbook and save as `.xlsx`.
-
-**3. Preview first (dry-run is the default)**
-
-```bash
-python resolve_qrz_discrepancies.py \
-    --xlsx  qrz_errors.xlsx \
-    --adif  wt8p.adi \
-    --call  WT8P
-```
-
-**4. Apply corrections**
-
-```bash
-python resolve_qrz_discrepancies.py \
-    --xlsx  qrz_errors.xlsx \
-    --adif  wt8p.adi \
-    --call  WT8P \
-    --update
-```
-
-### All Options
-
-```
---xlsx <file>               QRZ discrepancy Excel file (mutually exclusive with --input-csv)
---input-csv <file>          Flat CSV instead of Excel (see CSV Format below)
---adif <file>               Your QRZ ADIF export (must contain APP_QRZLOG_LOGID)
---call <callsign>           Your callsign (e.g. WT8P or TF/WT8P)
---key <api-key>             QRZ API key — optional if <CALLSIGN>.key file exists
---my-station                Correct your own station fields instead of the other party's
---update                    Apply changes to QRZ (default is dry-run — preview only)
---derive-coords             Derive related fields automatically (see Coordinate Derivation below)
---grid-precision {4,6,8}    Maidenhead precision when deriving grid from coordinates (default: 6)
---output-csv <file>         Output CSV log (default: resolved_log.csv)
-```
-
-### Input: Excel
-
-The Excel file can contain named sheets from the QRZ discrepancy export as well as an optional `MISC` sheet for anything else.
-
-**Named sheets** (always correct the other party's fields):
-
-| Sheet | ADIF field corrected |
+| Script | One-liner |
 |---|---|
-| `Grids` | `GRIDSQUARE` |
-| `State` | `STATE` |
-| `County` | `CNTY` |
-
-Column headers are matched by prefix, so `You Entered county`, `You Entered grid`, etc. all work. Rows where `Note` = `Bad Data` are skipped automatically.
-
-**MISC sheet** (optional, supports all field keywords):
-
-Add a sheet named `MISC` to your workbook with the same column format as the flat CSV: `field`, `qso_date`, `qso_with`, `new_value`, and optionally `note`. This sheet accepts every field keyword listed in the CSV Field Reference below — including `MY_GRIDSQUARE`, `MY_LOC`, `MY_LAT`/`MY_LON`, `MY_STATE`, `MY_CNTY`, `MY_CITY`, `MY_COUNTRY`, `MY_CQ_ZONE`, `MY_ITU_ZONE`, `MY_NAME`, and `COMMENT` — making it the easiest way to correct your own station fields from within the same Excel workbook. The `--derive-coords` and `--grid-precision` options apply to MISC sheet rows exactly as they do to CSV rows. Blank rows and rows whose first cell starts with `#` are skipped.
-
-### Input: Flat CSV (`--input-csv`)
-
-All discrepancy types in a single file. The `field` column indicates which ADIF field to correct.
-
-**Required columns:** `field`, `qso_date`, `qso_with`, `new_value`
-
-**Optional columns:** `you_entered`, `de`, `note` (`Bad Data` to skip a row)
-
-Column names are case-insensitive. Common aliases accepted: `call` for `qso_with`, `adif_field` for `field`, `other_party_entered` or `other_value` for `new_value`.
-
-#### CSV Field Reference and Examples
-
-The following example covers all supported `field` keywords. W1AW (the ARRL club station in Newington, CT) is used as the example contact.
-
-> Comment lines (beginning with `#`) and blank lines are silently skipped,
-> so you can annotate your CSV freely. The `sample_corrections.csv` file
-> included in this repository is a ready-to-edit starting point.
-
-```csv
-field,qso_date,qso_with,new_value,note
-
-# ── Other party's fields ──────────────────────────────────────────────────────
-# Correct the other party's grid square.
-GRIDSQUARE,2024-07-06 20:28:00,W1AW,FN31
-
-# Correct the other party's state. Non-standard abbreviations (e.g. TEN → TN)
-# are normalised automatically.
-STATE,2017-10-28 15:14:00,W1AW,CT
-
-# Correct the other party's county. Supply the QRZ display format, quoted
-# because it contains a comma. "County", "Borough" (AK), and "Parish" (LA)
-# are stripped automatically and the value converted to ADIF format.
-CNTY,2025-08-11 02:22:00,W1AW,"Hartford County, CT"
-
-# Mark a row as bad data to skip it without removing it from the file.
-GRIDSQUARE,2024-03-01 14:00:00,W1AW,LNA,Bad Data
-
-# ── Your own station's fields ────────────────────────────────────────────────
-# Use the MY_ prefix directly — no flag needed.
-
-# Your grid square
-MY_GRIDSQUARE,2025-08-11 02:22:00,W1AW,CN87xn
-
-# Your state and county
-MY_STATE,2025-08-11 02:22:00,W1AW,WA
-MY_CNTY,2025-08-11 02:22:00,W1AW,"King County, WA"
-
-# ── Coordinates: separate rows ────────────────────────────────────────────────
-# MY_LAT and MY_LON accept decimal degrees or ADIF native format.
-# Positive lat = North, negative = South.
-# Positive lon = East,  negative = West.
-MY_LAT,2025-08-11 02:22:00,W1AW,47.5625
-MY_LON,2025-08-11 02:22:00,W1AW,-122.058
-
-# ── Coordinates: combined row (MY_LOC) ────────────────────────────────────────
-# MY_LOC sets both MY_LAT and MY_LON from a single row.
-# The "lat,lon" value must be quoted so the comma is not treated as a column
-# separator. This expands into two separate MY_LAT and MY_LON updates.
-# With --derive-coords it also derives and updates MY_GRIDSQUARE.
-MY_LOC,2025-08-11 02:22:00,W1AW,"47.5625,-122.058"
-
-# ── Grid square with coordinate derivation (--derive-coords) ──────────────────
-# When --derive-coords is active, a MY_GRIDSQUARE row also emits MY_LAT
-# and MY_LON updates derived from the centre of the specified grid square.
-# Useful when your logging app reports a precise grid and you want all
-# three fields updated consistently.
-MY_GRIDSQUARE,2025-08-11 02:22:00,W1AW,CN87xn
-
-# ── Other station informational fields ────────────────────────────────────────
-# These pass through to QRZ as-is.  Useful when a portable operation logs with
-# the wrong city, country, or zone from a home-location default.
-MY_CITY,2025-08-11 02:22:00,W1AW,Bellevue
-MY_COUNTRY,2025-08-11 02:22:00,W1AW,United States
-MY_CQ_ZONE,2025-08-11 02:22:00,W1AW,3
-MY_ITU_ZONE,2025-08-11 02:22:00,W1AW,6
-MY_NAME,2025-08-11 02:22:00,W1AW,Jim Carson
-
-# ── Comment field ──────────────────────────────────────────────────────────────
-# COMMENT sets the QRZ logbook comment.
-# Useful for adding or correcting POTA/SOTA park references logged in the field.
-COMMENT,2026-03-28 16:35:00,AB0LV,US-3263 Scenic Beach State Park WA
-```
-
-**Summary of `field` keywords and what they update:**
-
-| `field` value | Updates | Notes |
-|---|---|---|
-| `GRIDSQUARE` | `GRIDSQUARE` | Other party's grid |
-| `STATE` | `STATE` | Other party's state; non-standard abbrevs normalised |
-| `CNTY` | `CNTY` | Other party's county; quoted QRZ display format: `"Hartford County, CT"` |
-| `MY_GRIDSQUARE` | `MY_GRIDSQUARE` | Your grid; also `MY_LAT` + `MY_LON` with `--derive-coords` |
-| `MY_STATE` | `MY_STATE` | Your state |
-| `MY_CNTY` | `MY_CNTY` | Your county; quoted QRZ display format: `"King County, WA"` |
-| `MY_LAT` | `MY_LAT` | Your latitude (decimal or ADIF native format) |
-| `MY_LON` | `MY_LON` | Your longitude (decimal or ADIF native format) |
-| `MY_LOC` | `MY_LAT` + `MY_LON` | Combined lat/lon — value must be quoted `"lat,lon"`; also updates `MY_GRIDSQUARE` with `--derive-coords` |
-| `MY_CITY` | `MY_CITY` | Your station city / QTH |
-| `MY_COUNTRY` | `MY_COUNTRY` | Your station country |
-| `MY_CQ_ZONE` | `MY_CQ_ZONE` | Your CQ zone number |
-| `MY_ITU_ZONE` | `MY_ITU_ZONE` | Your ITU zone number |
-| `MY_NAME` | `MY_NAME` | Your name as logged |
-| `COMMENT` | `COMMENT` | QRZ logbook comment (free text) |
-
-### Correcting Your Own Station's Fields
-
-Use the `MY_` prefix in the `field` column to correct your own station fields — no special flag is needed. The following are all valid in both the flat CSV and the Excel `MISC` sheet: `MY_GRIDSQUARE`, `MY_STATE`, `MY_CNTY`, `MY_LAT`, `MY_LON`, `MY_LOC`, `MY_CITY`, `MY_COUNTRY`, `MY_CQ_ZONE`, `MY_ITU_ZONE`, and `MY_NAME`.
-
-**`MY_LAT` and `MY_LON`** accept either decimal degrees or ADIF native format:
-
-| Format | Example | Meaning |
-|---|---|---|
-| Decimal, positive lat | `47.5625` | North |
-| Decimal, negative lat | `-47.5625` | South |
-| Decimal, positive lon | `122.058` | East |
-| Decimal, negative lon | `-122.058` | West |
-| ADIF native | `N047 33.750` | North 47° 33.750' |
-| ADIF native | `W122 03.480` | West 122° 03.480' |
-
-### Coordinate Derivation (`--derive-coords`)
-
-When `--derive-coords` is active, the script automatically derives related fields so that your grid square and coordinates stay in sync:
-
-- **`MY_LOC` row** — expands to `MY_LAT` + `MY_LON` updates (always), and also derives and updates `MY_GRIDSQUARE` from those coordinates.
-- **`MY_GRIDSQUARE` row** — updates the grid square (always), and also derives and updates `MY_LAT` + `MY_LON` from the centre point of the specified grid square.
-
-Use `--grid-precision` to set the number of Maidenhead characters when deriving a grid from coordinates:
-
-| Precision | Characters | Approximate resolution |
-|---|---|---|
-| 4 | e.g. `CN87` | ~55 km |
-| 6 | e.g. `CN87xn` | ~460 m (default) |
-| 8 | e.g. `CN87xn35` | ~4 m |
-
-> **Note:** When deriving coordinates *from* a grid square, the grid must be at least 6 characters — a 4-character grid spans ~55 km and is rejected as too coarse. The lat/lon written to QRZ is the centre point of the square, which for a 6-character grid can be up to ~230 m from your actual position. If precision matters, use `MY_LOC` with your actual decimal coordinates and let `--derive-coords` derive the grid from those.
-
-```bash
-# Field operation: app gives you a precise grid — update all three fields
-python resolve_qrz_discrepancies.py \
-    --input-csv my_corrections.csv \
-    --adif wt8p.adi \
-    --call WT8P \
-    --derive-coords \
-    --grid-precision 6
-```
-
-### Output CSV (`resolved_log.csv`)
-
-| Column | Description |
-|---|---|
-| `sheet` | Source sheet (`Grids`, `State`, `County`) |
-| `adif_field` | ADIF field corrected |
-| `qso_with` | Other party's callsign |
-| `qso_date` | YYYYMMDD |
-| `time_on` | HHMM |
-| `logid` | QRZ internal record ID |
-| `old_value` | Value in QRZ before correction |
-| `new_value` | Value applied (in ADIF format) |
-| `status` | `updated` \| `dry_run` \| `no_change` \| `skipped_bad_data` \| `no_match` \| `error` |
-| `error_msg` | Failure detail, blank on success |
-
-### Field Format Conversions
-
-**County (`CNTY` / `MY_CNTY`):** Supply the value in QRZ display format, quoted because it contains a comma: `"Hartford County, CT"`. The script converts it to ADIF format (`ST,County Name`) before writing to QRZ. The word `County` is stripped automatically; for Alaska `Borough` is also stripped (e.g. `"Anchorage Borough, AK"` → `AK,Anchorage`), and for Louisiana `Parish` is stripped.
-
-**State (`STATE`):** Non-standard abbreviations (e.g. `IND` → `IN`) are automatically normalised to 2-letter ADIF values.
-
-### How It Works
-
-The script uses `ACTION=INSERT` with `OPTION=REPLACE` on the QRZ API. Including `APP_QRZLOG_LOGID` in the ADIF payload causes QRZ to replace the existing record in place, returning `RESULT=REPLACE`. This works on both unconfirmed and confirmed/award-locked records — unlike `ACTION=DELETE`, which fails silently on locked records.
-
-Records are matched using: **Callsign + Date + Time (HHMM)**.
-
----
-
-## `adif_extract.py`
-
-Extracts QSOs from a QRZ ADIF export to an inspection CSV, with optional date-range or single-date filtering. Designed for the common portable-operations workflow: export a range of contacts from QRZ, spot-check `MY_` fields and `COMMENT` in Excel, fill in corrections, then feed the result back to `resolve_qrz_discrepancies.py`.
-
-Does not call the QRZ API and requires no API key.
-
-### Quick Start
-
-**1. Extract a single activation date**
-
-```bash
-python adif_extract.py --adif wt8p.adi --date 2026-03-28
-```
-
-**2. Extract a date range**
-
-```bash
-python adif_extract.py --adif wt8p.adi --after 2026-03-20 --before 2026-03-31 --output-csv march_pota.csv
-```
-
-**3. Open the CSV in Excel, review and fill in corrections**
-
-The `field` and `new_value` columns are blank — add the field to correct and its new value on each row. Duplicate a row if the same QSO needs multiple corrections. Delete rows you don't need to change.
-
-**4. Feed the edited CSV to resolve_qrz_discrepancies.py**
-
-```bash
-python resolve_qrz_discrepancies.py \
-    --input-csv march_pota.csv \
-    --adif wt8p.adi \
-    --call WT8P \
-    --derive-coords
-```
-
-### All Options
-
-```
---adif <file>           QRZ ADIF export file (required)
---date <DATE>           Extract a single date — shorthand for --after DATE --before DATE
-                        Mutually exclusive with --after.
---after <DATE>          Include QSOs on or after this date (inclusive)
---before <DATE>         Include QSOs on or before this date (inclusive)
---output-csv <file>     Output CSV filename (default: adif_extract.csv)
-```
-
-Date formats accepted for all date arguments: `YYYY-MM-DD` or `YYYYMMDD`.
-
-### Output CSV Columns
-
-| Column | Description |
-|---|---|
-| `field` | **Blank — fill in** the ADIF field name to correct (e.g. `MY_GRIDSQUARE`, `COMMENT`) |
-| `qso_date` | QSO date in `YYYY-MM-DD` format |
-| `time_on` | QSO time in `HH:MM` format |
-| `call` | Contacted station callsign |
-| `MY_GRIDSQUARE` | Your grid square as logged |
-| `MY_LAT` | Your latitude (ADIF format) |
-| `MY_LON` | Your longitude (ADIF format) |
-| `MY_STATE` | Your state |
-| `MY_CNTY` | Your county (ADIF format, e.g. `WA,Kitsap`) |
-| `MY_CITY` | Your city |
-| `MY_COUNTRY` | Your country |
-| `MY_CQ_ZONE` | Your CQ zone |
-| `MY_ITU_ZONE` | Your ITU zone |
-| `MY_DXCC` | Your DXCC entity code |
-| `MY_NAME` | Your name as logged |
-| `COMMENT` | QRZ logbook comment |
-| `new_value` | **Blank — fill in** the corrected value |
-
-### Typical POTA / Portable Workflow
-
-When logging in the field, apps like N3FJP or WSJT-X may capture your grid automatically but sometimes use your home location for lat/lon, or a QRZ upload can overwrite the correct grid with your default location. The typical correction flow is:
-
-1. After an activation, export your full QRZ ADIF (or use a previous export if it's current).
-2. Run `adif_extract.py --date <activation-date>` to pull just that day's QSOs.
-3. In Excel: verify `MY_GRIDSQUARE`, `MY_LAT`, `MY_LON`, and `COMMENT`. For each field that needs correcting, set `field` = the ADIF field name and `new_value` = the correct value.
-4. Save as CSV and run `resolve_qrz_discrepancies.py --input-csv ... --derive-coords`. With `--derive-coords`, a single `MY_GRIDSQUARE` correction (6+ characters) will also update `MY_LAT` and `MY_LON` from the grid centre automatically.
-
----
-
-## `reconcile_adif.py`
-
-Compares a LoTW ADIF export against a QRZ ADIF export for the same callsign, identifies field-level discrepancies, and optionally pushes corrections to QRZ.
-
-> **Important:** Export only *confirmed* QSOs from LoTW. In LoTW, use **Search QSOs → QSL Rcvd = Yes** before downloading. The script also checks `APP_LOTW_2XQSL=Y` as a safety net, but the export filter is the primary mechanism.
-
-### Quick Start
-
-**1. Export your logs**
-
-- **LoTW:** Download confirmed QSOs as ADIF (all callsigns can be in one file).
-- **QRZ:** Logbook → Settings → Export. One file per callsign/logbook.
-
-**2. Compare only (no API writes)**
-
-```bash
-python reconcile_adif.py \
-    --lotw  lotw_confirmed.adi \
-    --qrz   wt8p.adi \
-    --call  WT8P
-```
-
-This produces `corrected_qrz.adi` (for manual import) and `reconciliation_report.csv`.
-
-**3. Compare and push corrections to QRZ**
-
-```bash
-python reconcile_adif.py \
-    --lotw  lotw_confirmed.adi \
-    --qrz   wt8p.adi \
-    --call  WT8P \
-    --update-qrz \
-    --dry-run
-```
-
-Remove `--dry-run` to apply live.
-
-### All Options
-
-```
---lotw <file>           LoTW ADIF export (confirmed QSOs only)
---qrz <file>            QRZ ADIF export (must contain APP_QRZLOG_LOGID)
---call <callsign>       Callsign to process — filters LoTW by STATION_CALLSIGN
---config <file>         Field rules config file (default: <CALLSIGN>.cfg)
---update-qrz            Push corrections to QRZ via API
---key <api-key>         QRZ API key — optional if <CALLSIGN>.key file exists
---dry-run               Preview corrections without writing to QRZ
---output-adif <file>    Corrected ADIF output (default: corrected_qrz.adi)
---output-csv <file>     Report CSV (default: reconciliation_report.csv)
-```
-
-### Multiple Callsigns
-
-LoTW can export all your callsigns in a single file. The `--call` argument filters the export to only the records for that callsign's `STATION_CALLSIGN`. Run the script once per callsign, pointing `--qrz` at the corresponding QRZ export each time.
-
-### Fields Compared
-
-| Field | Default Rule | Notes |
-|---|---|---|
-| `GRIDSQUARE` | `lotw_wins` | First 4 chars compared (QRZ may have more precision) |
-| `COUNTRY` | `fill_blank` | Only fills if QRZ field is empty |
-| `DXCC` | `lotw_wins` | Compared as integer |
-| `CQZ` | `lotw_wins` | Compared as integer, leading zeros ignored |
-| `ITUZ` | `lotw_wins` | Compared as integer, leading zeros ignored |
-| `MODE` | `flag_only` | Reported but not auto-corrected |
-| `STATE` | `lotw_wins` | US contacts only (`DXCC=291`); skipped if value is numeric |
-| `CNTY` | `lotw_wins` | US contacts only; skipped if value is numeric |
-| `MY_COUNTRY` | `lotw_wins` | Normalises verbose names (e.g. `UNITED STATES OF AMERICA` → `United States`) |
-| `MY_CQ_ZONE` | `lotw_wins` | Integer comparison |
-| `MY_ITU_ZONE` | `lotw_wins` | Integer comparison |
-| `MY_DXCC` | `lotw_wins` | Integer comparison |
-| `MY_STATE` | `lotw_wins` | |
-| `MY_CNTY` | `lotw_wins` | |
-| `APP_LOTW_RXQSL` | `fill_blank` | Maps to `LOTW_QSL_RCVD` in QRZ |
-
-### Configuration File
-
-Per-field rules can be customised in a config file named `<CALLSIGN>.cfg` (e.g. `WT8P.cfg`). See the sample config file (`sample.cfg`) included in this repository.
-
-**Valid rules:**
-
-| Rule | Behaviour |
-|---|---|
-| `lotw_wins` | Apply LoTW value to QRZ record regardless of existing QRZ value |
-| `fill_blank` | Only apply LoTW value if QRZ field is empty |
-| `flag_only` | Report the difference in the CSV but do not correct |
-| `skip` | Ignore this field entirely |
-
-### Output: CSV Report (`reconciliation_report.csv`)
-
-One row per field-level discrepancy found. Clean records with no discrepancies are omitted.
-
-| Column | Description |
-|---|---|
-| `call` | Other party's callsign |
-| `qso_date` | YYYYMMDD |
-| `time_on` | HHMM |
-| `band` | Band |
-| `mode` | Mode |
-| `logid` | QRZ record ID |
-| `field` | ADIF field name |
-| `lotw_value` | Value from LoTW |
-| `qrz_value` | Value currently in QRZ |
-| `rule` | Rule applied (`lotw_wins`, `fill_blank`, etc.) |
-| `action` | `corrected` \| `flagged` \| `skipped` |
-| `record_status` | `ok` \| `updated` \| `dry_run` \| `no_match` \| `error` |
-| `error_msg` | Failure detail if applicable |
-
-### Output: Corrected ADIF (`corrected_qrz.adi`)
-
-Contains only records with at least one `corrected` field change. Can be imported into QRZ manually via **Logbook → Settings → ADIF Import** as an alternative to `--update-qrz`.
-
----
-
-## `adif_map.py`
-
-Plots an ADIF file on an interactive map in your browser. Your activating location(s) are shown — including multiple sites for portable operations like POTA. Contacts are clustered by zoom level and colored by band.
-
-> **Performance note:** The map works on a full log (tested at 35k contacts) but opening the HTML file is noticeably slow above ~5,000 QSOs. Use `adif_extract.py` to pull a date range or specific callsign before mapping if you only need a subset.
-
-### Quick Start
-
-**1. Get your ADIF file**
-
-Any ADIF file works — a QRZ export, a LoTW download, or the output of `adif_extract.py`. The map reads `MY_LAT`/`MY_LON` or `MY_GRIDSQUARE` per record to determine your transmit location, so multiple operating sites are handled automatically.
-
-**2. Plot contacts**
-
-```bash
-python adif_map.py mylog.adi
-```
-
-This produces `map_output.html` in the same directory as the ADIF file and opens it in your default browser.
-
-### All Options
-
-```
---band <BAND>            Filter by band (e.g. 40m, 20m) — single band
---mode <MODE>            Filter by single mode (e.g. CW) — kept for compatibility
---modes <LIST>           Filter by multiple modes, comma-separated (e.g. --modes CW,FT8)
---date-from <DATE>       Filter QSOs on or after date (YYYYMMDD or YYYY-MM-DD)
---date-to <DATE>         Filter QSOs on or before date (YYYYMMDD or YYYY-MM-DD)
---confirmed              Only show confirmed QSOs (LoTW or QSL received)
---show-arcs              Draw great-circle arc lines (default: off — slow on large logs)
---overlay <LIST>         Comma-separated overlays: grids, states, counties
---show-mode-filters      Show collapsible in-browser filter panel (see Filters section)
---theme <FILE>           Color theme YAML file (default: theme_default.yaml)
---verbose                Detailed console output: all operating locations, band breakdown
---output <FILE>          Output HTML filename (default: map_output.html beside input)
-```
-
-### Overlays
-
-The `--overlay` flag adds choropleth layers showing which entities you have worked and confirmed. Each overlay type uses a distinct color palette so multiple overlays are visually distinguishable:
-
-| Overlay | Confirmed | Worked (unconfirmed) | Not worked |
-|---|---|---|---|
-| States / Provinces | Green `#2ecc71` | Amber `#f39c12` | Outline only |
-| Counties | Dark green `#1a8a4a` | Burnt amber `#c0720a` | Outline only |
-| Grid squares | Orange `#e67e22` | Yellow `#f7dc6f` | Not drawn |
-
-Colors are configurable in `theme_default.yaml`. Border weights, fill opacity, and unworked border colors are also themeable.
-
-```bash
-# States and counties together (states as base layer, counties on top)
-python adif_map.py mylog.adi --overlay states,counties
-
-# All three — renders states → counties → grids (grids on top)
-python adif_map.py mylog.adi --overlay states,counties,grids
-
-# Combine with CLI filters
-python adif_map.py mylog.adi --modes CW --confirmed --overlay states,counties
-```
-
-**Grid squares** are generated from the `GRIDSQUARE` field (4-character precision, e.g. FN31) — no external file required. Only squares present in your filtered log are drawn.
-
-**States and provinces** (US + Canada) are read from `ne_states.geojson`, downloaded by `adif_setup.py`. Reads the `STATE` field and `DXCC` code (`DXCC=291` for US, `DXCC=1` for Canada).
-
-**Counties** (US only) are read from `us_counties.geojson`, also downloaded by `adif_setup.py`. Reads the `CNTY` field (e.g. `WA,King`). County/Parish/Borough suffixes are stripped automatically before matching.
-
-All three overlay layers are independently toggleable in the map's native layer control (top-right).
-
-### Interactive Filter Panel (`--show-mode-filters`)
-
-Adding `--show-mode-filters` injects a collapsible **Filters** panel in the top-left corner of the map. It starts collapsed — click to expand.
-
-```bash
-python adif_map.py mylog.adi --overlay states,counties --show-mode-filters
-```
-
-The panel has two sections:
-
-**Modes** — toggles contact dot visibility by mode group. Contacts are clustered into groups defined in the code:
-
-| Group | Includes |
-|---|---|
-| CW | CW |
-| SSB | SSB, USB, LSB, AM, FM |
-| Digital | FT8, FT4, FT4, DATA, RTTY, JT65, JT9, PSK31, and others |
-| Other | Any mode not matched above |
-
-Unchecking a group removes those contacts from the map entirely.
-
-**Bands** — does not affect contact dot visibility, but dynamically recomputes the overlay choropleth colors. Unchecking 40m instantly updates the state/county/grid fill colors to reflect only your remaining active bands. This is useful for questions like "which counties have I confirmed on CW and 20m?"
-
-When `--show-mode-filters` is active with overlays, the overlay coloring is fully dynamic — every mode and band toggle immediately recomputes confirmed/worked/needed status for every entity on screen.
-
-> **Known limitation:** Individual sub-mode checkboxes (e.g. FM within the SSB group) are displayed but currently filter at the group level only. Unchecking FM shows the SSB group checkbox as partially active, but the map still reflects the full SSB group. Per-mode filtering within groups is a planned improvement.
-
-### Color Themes
-
-Colors and stroke widths are controlled by `theme_default.yaml`. Copy and edit it, then pass `--theme mytheme.yaml`:
-
-```yaml
-overlay:
-  states:
-    confirmed_weight: 3.0      # thicker state borders
-    confirmed: "#27ae60"       # slightly different green
-  counties:
-    confirmed: "#1a5c33"       # darker county fill
-```
-
-The `contact_dot` section controls the appearance of contact markers (radius, fill opacity, border color and weight).
-
-![Show each Base location](show_activation_location.jpg)
-
-<img src="TF_Contacts.jpg" alt="TF_Contacts" style="zoom:50%;" />
-
-## `qrz_common.py` — Shared Library
-
-This file is used by all scripts and is not run directly. It provides:
-
-- **ADIF parser** — `parse_adif_file()` for QSO records; `parse_adif_with_header()` also returns header-level fields (used by `adif_map.py` for `MY_LAT`/`MY_LON`/`MY_GRIDSQUARE`); handles HTML-escaped brackets from QRZ API responses
-- **QRZ API client** — `ACTION=INSERT OPTION=REPLACE` for in-place updates
-- **Key file loader** — reads `<CALLSIGN>.key`, maps `/` to `_` in filenames
-- **Config file loader** — reads `<CALLSIGN>.cfg` for per-field rules
-- **Field converters** — `CNTY` display-to-ADIF format, `STATE` normalisation, coordinate validation
-- **Maidenhead grid utilities** — `latlon_to_grid()` converts decimal coordinates to a 4-, 6-, or 8-character grid locator; `grid_to_latlon()` converts a grid locator back to the decimal lat/lon of its centre point; `adif_latlon_to_decimal()` converts ADIF `N/S/E/W DDD MM.MMM` coordinate strings to decimal degrees
-- **Date/time normalisation** — `parse_qso_datetime()` accepts both ADIF compact format (`YYYYMMDD` / `HHMM`, as found in QRZ exports) and human-readable format (`YYYY-MM-DD` / `HH:MM`), used by all scripts; `format_qso_datetime()` converts ADIF compact to human-readable for CSV output
-- **Field comparison utilities** — integer normalisation, gridsquare prefix matching, country name mapping
+| Map your log | `python adif_map.py mylog.adi` |
+| Map with overlays and arcs | `python adif_map.py mylog.adi --overlay states,counties,grids --show-arcs` |
+| Preview discrepancy corrections | `python resolve_qrz_discrepancies.py --xlsx qrz_errors.xlsx --adif wt8p.adi --call WT8P` |
+| Apply discrepancy corrections | `python resolve_qrz_discrepancies.py --xlsx qrz_errors.xlsx --adif wt8p.adi --call WT8P --update` |
+| Extract a single activation date | `python adif_extract.py --adif wt8p.adi --date 2026-03-28` |
+| Reconcile LoTW vs QRZ | `python reconcile_adif.py --lotw lotw.adi --qrz wt8p.adi --call WT8P` |
+
+For full option reference, workflows, CSV formats, and field documentation, see **[USAGE.md](USAGE.md)**.
 
 ---
 
 ## Notes
 
-- Always run without `--update` first to verify matches and proposed values before writing.
+- Always run without `--update` / `--update-qrz` first to verify matches and proposed values before writing.
 - Export a fresh ADIF from QRZ before each run — `APP_QRZLOG_LOGID` values can change if records were previously updated.
 - The scripts pause 1 second between API calls to avoid rate limiting.
-- For `reconcile_adif.py`, unmatched LoTW records (no corresponding QRZ entry) are logged in the CSV as `no_match` — this is normal for contacts logged in LoTW before you joined QRZ, or contacts the other party hasn't logged in QRZ.
-- QRZ's user interface will report counties with "County" or "Borough" (Alaska only), which differs from what is contained in the ADIF file.  We will strip that off for you, so no worries.
-- In some cases, bad data is reported by the other person.  For example, if a user specifies their grid as "LNA."  You can mark these as bad data, or the API will simply fail silently.  There's really no remedy from our side.
+- In some cases, bad data is reported by the other party (e.g. a grid square of "LNA"). You can mark these as bad data in your corrections file, or the API will fail silently. There is no remedy from this side.
