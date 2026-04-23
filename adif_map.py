@@ -72,6 +72,7 @@ _THEME_DEFAULTS = {
         "70cm": "#CC00AA",
     },
     "default_color": "#888888",
+    "map_center_lon_offset": 0,    # degrees; shift initial view west (negative) or east (positive)
     "contact_dot": {
         "radius": 6,
         "fill_opacity": 0.85,
@@ -105,6 +106,7 @@ OVERLAY_COLORS:  dict = {"confirmed": "#2ecc71", "worked": "#f39c12"}
 STATES_COLORS:   dict = {}
 COUNTIES_COLORS: dict = {}
 GRIDS_COLORS:    dict = {}
+MAP_LON_OFFSET:  float = 0.0    # populated by load_theme()
 
 
 def load_theme(theme_path=None) -> None:
@@ -114,7 +116,7 @@ def load_theme(theme_path=None) -> None:
     theme_path: Path or str, or None to use theme_default.yaml beside this script.
     """
     global BAND_COLORS, DEFAULT_COLOR, OVERLAY_COLORS
-    global STATES_COLORS, COUNTIES_COLORS, GRIDS_COLORS
+    global STATES_COLORS, COUNTIES_COLORS, GRIDS_COLORS, MAP_LON_OFFSET
 
     theme = dict(_THEME_DEFAULTS)
 
@@ -133,6 +135,8 @@ def load_theme(theme_path=None) -> None:
                     loaded = yaml.safe_load(f)
                 if loaded:
                     # Deep-merge: overlay sub-keys are merged individually
+                    if "map_center_lon_offset" in loaded:
+                        theme["map_center_lon_offset"] = loaded["map_center_lon_offset"]
                     if "band_colors" in loaded:
                         theme["band_colors"].update(loaded["band_colors"])
                     if "default_color" in loaded:
@@ -156,6 +160,7 @@ def load_theme(theme_path=None) -> None:
     GRIDS_COLORS   = theme["overlay"]["grids"]
     OVERLAY_COLORS = {"confirmed": STATES_COLORS["confirmed"],
                       "worked":    STATES_COLORS["worked"]}
+    MAP_LON_OFFSET = float(theme.get("map_center_lon_offset", 0))
 
 
 # ---------------------------------------------------------------------------
@@ -238,7 +243,14 @@ def _resolve_my_coords_for_record(record: dict):
 # Great-circle arc interpolation
 # ---------------------------------------------------------------------------
 def _gc_points(p1, p2, n=32):
-    """Return n+1 (lat,lon) points along the great-circle between p1 and p2."""
+    """
+    Return great-circle points between p1 and p2 as a list of segments.
+
+    Longitudes are first unwrapped into a continuous chain (which may
+    temporarily exceed ±180°), then renormalised and split at any
+    antimeridian crossing so each segment stays within [-180, 180].
+    Leaflet renders one PolyLine per segment; callers must iterate.
+    """
     lat1, lon1 = math.radians(p1[0]), math.radians(p1[1])
     lat2, lon2 = math.radians(p2[0]), math.radians(p2[1])
     d = 2 * math.asin(math.sqrt(
@@ -246,7 +258,8 @@ def _gc_points(p1, p2, n=32):
         math.cos(lat1) * math.cos(lat2) * math.sin((lon2 - lon1) / 2) ** 2
     ))
     if d < 1e-9:
-        return [p1, p2]
+        return [[p1, p2]]
+
     pts = []
     for i in range(n + 1):
         f = i / n
@@ -257,9 +270,36 @@ def _gc_points(p1, p2, n=32):
         z = A * math.sin(lat1) + B * math.sin(lat2)
         lat = math.degrees(math.atan2(z, math.sqrt(x**2 + y**2)))
         lon = math.degrees(math.atan2(y, x))
-        pts.append((lat, lon))
-    return pts
+        pts.append([lat, lon])
 
+    # Unwrap into a continuous chain (may go outside [-180, 180])
+    for i in range(1, len(pts)):
+        diff = pts[i][1] - pts[i - 1][1]
+        if diff > 180:
+            pts[i][1] -= 360
+        elif diff < -180:
+            pts[i][1] += 360
+
+    # Split into Leaflet-renderable segments at antimeridian crossings.
+    # Renormalise each point into [-180, 180]; start a new segment whenever
+    # normalisation causes a jump > 170° from the previous normalised point.
+    segments = []
+    current = []
+    for pt in pts:
+        lat, lon = pt
+        norm_lon = lon
+        while norm_lon > 180:
+            norm_lon -= 360
+        while norm_lon < -180:
+            norm_lon += 360
+        if current and abs(norm_lon - current[-1][1]) > 170:
+            segments.append(current)
+            current = []
+        current.append((lat, norm_lon))
+    if current:
+        segments.append(current)
+
+    return [s for s in segments if len(s) >= 2]
 
 # ---------------------------------------------------------------------------
 # Filtering
@@ -338,7 +378,7 @@ BAND_GROUPS = [
 # ---------------------------------------------------------------------------
 
 def _select_arcs(records: list, arc_max: int = 1000,
-                 arc_cell_max: int = 3) -> list:
+                 arc_cell_max: int = 2) -> list:
     """
     Return a decimated list of records to draw as arcs.
 
@@ -388,11 +428,11 @@ def _select_arcs(records: list, arc_max: int = 1000,
 
 
 def build_map(my_coords, records, show_arcs: bool,
-              arc_max: int = 1000, arc_cell_max: int = 3):
+              arc_max: int = 1000, arc_cell_max: int = 2):
     from folium.plugins import MarkerCluster
 
     m = folium.Map(
-        location=my_coords,
+        location=(my_coords[0], my_coords[1] + MAP_LON_OFFSET),
         zoom_start=3,
         tiles=None,
     )
@@ -563,14 +603,17 @@ def build_map(my_coords, records, show_arcs: bool,
             date   = r.get('QSO_DATE', '')
             color  = BAND_COLORS.get(band, DEFAULT_COLOR)
             conf   = "✓ confirmed" if is_confirmed(r) else ""
-            folium.PolyLine(
-                locations=_gc_points(origin, coords),
-                color=color,
-                weight=1,
-                opacity=0.45,
-                tooltip=f"{call} | {band} {mode} | {date} {conf}",
-                dash_array="6 4",
-            ).add_to(arc_fg)
+            tip    = f"{call} | {band} {mode} | {date} {conf}"
+            # _gc_points returns a list of segments (split at antimeridian)
+            for seg in _gc_points(origin, coords):
+                folium.PolyLine(
+                    locations=seg,
+                    color=color,
+                    weight=1,
+                    opacity=0.45,
+                    tooltip=tip,
+                    dash_array="6 4",
+                ).add_to(arc_fg)
         arc_fg.add_to(m)
         print(f"  Arcs: {len(arc_records)} drawn from "
               f"{len({r.get('CALL','') for r in records})} unique contacts "
@@ -1518,7 +1561,7 @@ def main():
                         help="Draw great-circle arc lines (default: off — slow on large logs)")
     parser.add_argument("--arc-max", dest="arc_max", type=int, default=1000,
                         help="Maximum total arcs to draw when --show-arcs is active (default: 1000)")
-    parser.add_argument("--arc-cell-max", dest="arc_cell_max", type=int, default=3,
+    parser.add_argument("--arc-cell-max", dest="arc_cell_max", type=int, default=2,
                         help="Maximum arcs per 5°x5° geographic cell — limits dense clusters (default: 3)")
     parser.add_argument("--cluster-by-band", dest="cluster_by_band", action="store_true",
                         help="Separate cluster bubble per band, toggleable via layer control (default: all bands together)")

@@ -1,3 +1,5 @@
 *.key
 __pycache__
 resolved_log.csv
+*.html 
+*.adi

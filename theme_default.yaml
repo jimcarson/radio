@@ -3,6 +3,16 @@
 # All color values are CSS hex strings.
 
 # ---------------------------------------------------------------------------
+# Map display settings
+# ---------------------------------------------------------------------------
+
+# Shift the initial map center east (+) or west (-) of your station longitude.
+# Useful if your contacts are spread across the antimeridian — e.g. a West
+# Coast US station with contacts in both Europe and Asia/Pacific should shift
+# west so both sides are visible on load. Set to 0 to center on your station.
+map_center_lon_offset: 122
+
+# ---------------------------------------------------------------------------
 # Contact dot style
 # ---------------------------------------------------------------------------
 contact_dot:
@@ -41,8 +51,6 @@ overlay:
   states:
     confirmed:        "#2ecc71"   # medium green fill
     worked:           "#f39c12"   # amber fill
-    #border_confirmed: "#1a7a45"   # darker green border
-    #border_worked:    "#b8860b"   # darker amber border
     border_confirmed: "#000000"   # black
     border_worked:    "#000000"   # black
     confirmed_weight: 2.0         # border stroke width — confirmed states
