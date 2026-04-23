@@ -321,6 +321,16 @@ MODE_GROUPS = [
     ("Other",   None),   # None = catch-all for anything not matched above
 ]
 
+# Band grouping for the browser-side filter panel.
+# Each tuple: (group_label, set_of_band_strings).
+# None = catch-all for bands not matched above.
+BAND_GROUPS = [
+    ("HF",  {"160m", "80m", "60m", "40m", "30m", "20m", "17m",
+              "15m", "12m", "10m", "6m"}),
+    ("VHF+", {"2m", "1.25m", "70cm", "33cm", "23cm", "13cm"}),
+    ("Other", None),
+]
+
 
 def build_map(my_coords, records, show_arcs: bool):
     from folium.plugins import MarkerCluster
@@ -951,6 +961,28 @@ def inject_toggle_panel(m, filtered_records: list, layer_meta: dict) -> None:
     active_groups    = json.dumps(sorted(mode_fg_names.keys()))
     bands_js         = json.dumps(bands_present)
 
+    # Band group structure for grouped checkbox rendering
+    catch_all_band = next((g[0] for g in BAND_GROUPS if g[1] is None), 'Other')
+    band_group_of = {}
+    for b in bands_present:
+        assigned = catch_all_band
+        for lbl, members in BAND_GROUPS:
+            if members is not None and b in members:
+                assigned = lbl
+                break
+        band_group_of[b] = assigned
+    # active groups in order, only those present in log
+    seen = set()
+    band_group_order = []
+    for lbl, _ in BAND_GROUPS:
+        if lbl not in seen and any(band_group_of.get(b)==lbl for b in bands_present):
+            seen.add(lbl); band_group_order.append(lbl)
+    band_group_members = {g: [b for b in bands_present if band_group_of.get(b)==g]
+                          for g in band_group_order}
+    band_group_of_js    = json.dumps(band_group_of)
+    band_group_order_js = json.dumps(band_group_order)
+    band_group_members_js = json.dumps(band_group_members)
+
     # Serialize overlay dynamic data
     # overlay_dyn: {type: {varName, data, grpIndex, bandIndex}}
     overlay_dyn = {}
@@ -1037,8 +1069,10 @@ def inject_toggle_panel(m, filtered_records: list, layer_meta: dict) -> None:
     <div class="sh" id="adif-mhead">
       Modes
       <span>
+        <!-- all/none suppressed — use native layer control for mode groups
         <span class="sa" id="adif-mall">all</span>
         <span class="sa" id="adif-mnone">none</span>
+        -->
         <span id="adif-mchev" class="chv">▼</span>
       </span>
     </div>
@@ -1047,8 +1081,10 @@ def inject_toggle_panel(m, filtered_records: list, layer_meta: dict) -> None:
     <div class="sh" id="adif-bhead">
       Bands
       <span>
+        <!-- all/none suppressed
         <span class="sa" id="adif-ball">all</span>
         <span class="sa" id="adif-bnone">none</span>
+        -->
         <span id="adif-bchev" class="chv">▼</span>
       </span>
     </div>
@@ -1063,7 +1099,10 @@ setTimeout(function() {{
     var modeFgNames  = {mode_fg_names_js};
     var modeFgModes  = {mode_fg_modes_js};
     var activeGroups = {active_groups};
-    var bandsPresent = {bands_js};
+    var bandsPresent    = {bands_js};
+    var bandGroupOf     = {band_group_of_js};
+    var bandGroupOrder  = {band_group_order_js};
+    var bandGroupMembers= {band_group_members_js};
     var bandColors   = {band_colors_js};
     var overlayDyn   = {overlay_dyn_js};
     var themeColors  = {colors_js};
@@ -1109,23 +1148,38 @@ setTimeout(function() {{
         }});
     }}
 
-    // ── Build band checkboxes ──────────────────────────────────
+    // ── Build band checkboxes (grouped by HF/VHF+/Other) ──────
     var bandsBody = document.getElementById('adif-bands-body');
     if (bandsBody) {{
-        bandsPresent.forEach(function(band) {{
-            var color = bandColors[band] || '#888';
-            var row   = document.createElement('div');
-            row.className = 'tr';
-            var cb = document.createElement('input');
-            cb.type='checkbox'; cb.id='cb-band-'+band; cb.checked=true;
-            cb.addEventListener('change', function() {{ adifBandToggle(band, this.checked); }});
-            var sw = document.createElement('span');
-            sw.className='sw'; sw.style.background=color;
-            var lb = document.createElement('label');
-            lb.htmlFor='cb-band-'+band; lb.textContent=band;
-            lb.style.cursor='pointer';
-            row.appendChild(cb); row.appendChild(sw); row.appendChild(lb);
-            bandsBody.appendChild(row);
+        bandGroupOrder.forEach(function(grp) {{
+            var members = bandGroupMembers[grp] || [];
+            // Group header
+            var ghdr = document.createElement('div');
+            ghdr.className = 'tr'; ghdr.style.marginTop = '3px';
+            var gcb = document.createElement('input');
+            gcb.type='checkbox'; gcb.id='cb-bgrp-'+grp; gcb.checked=true;
+            gcb.addEventListener('change', function() {{ adifBandGroupToggle(grp, this.checked); }});
+            var glb = document.createElement('label');
+            glb.htmlFor='cb-bgrp-'+grp; glb.textContent=grp;
+            glb.style.cssText='cursor:pointer;font-weight:bold';
+            ghdr.appendChild(gcb); ghdr.appendChild(glb);
+            bandsBody.appendChild(ghdr);
+            // Individual bands in group
+            members.forEach(function(band) {{
+                var color = bandColors[band] || '#888';
+                var row   = document.createElement('div');
+                row.className = 'tr'; row.style.paddingLeft = '16px';
+                var cb = document.createElement('input');
+                cb.type='checkbox'; cb.id='cb-band-'+band; cb.checked=true;
+                cb.addEventListener('change', function() {{ adifBandToggle(band, this.checked); }});
+                var sw = document.createElement('span');
+                sw.className='sw'; sw.style.background=color;
+                var lb = document.createElement('label');
+                lb.htmlFor='cb-band-'+band; lb.textContent=band;
+                lb.style.cursor='pointer';
+                row.appendChild(cb); row.appendChild(sw); row.appendChild(lb);
+                bandsBody.appendChild(row);
+            }});
         }});
     }}
 
@@ -1233,8 +1287,24 @@ setTimeout(function() {{
         recomputeAllOverlays();
     }};
 
+    window.adifBandGroupToggle = function(grp, checked) {{
+        var members = bandGroupMembers[grp] || [];
+        members.forEach(function(band) {{
+            if (checked) activeBands.add(band); else activeBands.delete(band);
+            var cb = document.getElementById('cb-band-'+band);
+            if (cb) cb.checked = checked;
+        }});
+        recomputeAllOverlays();
+    }};
+
     window.adifBandToggle = function(band, checked) {{
         if (checked) activeBands.add(band); else activeBands.delete(band);
+        // Update group checkbox state
+        var grp = bandGroupOf[band];
+        var members = bandGroupMembers[grp] || [];
+        var anyOn = members.some(function(b) {{ return activeBands.has(b); }});
+        var gcb = document.getElementById('cb-bgrp-'+grp);
+        if (gcb) gcb.checked = anyOn;
         recomputeAllOverlays();
     }};
 
@@ -1281,10 +1351,11 @@ setTimeout(function() {{
     }}
     wireSection('adif-modes-body', 'adif-mchev', 'adif-mhead');
     wireSection('adif-bands-body', 'adif-bchev', 'adif-bhead');
-    wireClick('adif-mall',  function(e) {{ e.stopPropagation(); adifSelectModes(true);  }});
-    wireClick('adif-mnone', function(e) {{ e.stopPropagation(); adifSelectModes(false); }});
-    wireClick('adif-ball',  function(e) {{ e.stopPropagation(); adifSelectBands(true);  }});
-    wireClick('adif-bnone', function(e) {{ e.stopPropagation(); adifSelectBands(false); }});
+    // all/none wireClicks suppressed
+    // wireClick('adif-mall',  ...adifSelectModes(true));
+    // wireClick('adif-mnone', ...adifSelectModes(false));
+    // wireClick('adif-ball',  ...adifSelectBands(true));
+    // wireClick('adif-bnone', ...adifSelectBands(false));
 
     // Hide band section note if no overlays are active
     var note = document.getElementById('adif-band-note');
