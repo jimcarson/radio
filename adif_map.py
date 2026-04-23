@@ -21,8 +21,7 @@ Options:
     --date-to DATE          Filter QSOs on or before date (YYYYMMDD or YYYY-MM-DD)
     --confirmed             Only show confirmed QSOs (LoTW or QSL card received)
     --show-arcs             Show great-circle arc lines (default: off — slow on large logs)
-    parser.add_argument("--show-mode-filters", dest="show_filters", action="store_true",
-                        help="Show collapsible mode filter panel (top-left corner)")
+    --show-filters          Show collapsible band/mode filter panel (top-left corner)
     --overlay LIST          Comma-separated overlays: grids, states, counties
     --theme FILE            Color theme YAML file (default: theme_default.yaml)
     --verbose               Detailed console output: all station locations, band breakdown
@@ -202,10 +201,12 @@ def resolve_my_coords(header: dict, records: list):
             except (ValueError, Exception):
                 pass
 
+    origins_seen = set()
     origins = []
     for r in records:
         c = _resolve_my_coords_for_record(r)
-        if c and c not in origins:
+        if c and c not in origins_seen:
+            origins_seen.add(c)
             origins.append(c)
 
     if origins:
@@ -539,10 +540,7 @@ def _classify_contacts(records: list, key_fn) -> dict:
         key = key_fn(r)
         if not key:
             continue
-        confirmed = (
-            r.get('LOTW_QSL_RCVD', '').upper() == 'Y' or
-            r.get('QSLRCD', '').upper() == 'Y'
-        )
+        confirmed = is_confirmed(r)
         counts[key] = counts.get(key, 0) + 1
         if confirmed:
             status[key] = 'confirmed'
@@ -587,8 +585,7 @@ def _build_overlay_qso_data(records: list, key_fn,
             continue
         mode = r.get('MODE', '').upper()
         band = r.get('BAND', 'unknown').lower()
-        conf = 1 if (r.get('LOTW_QSL_RCVD','').upper()=='Y' or
-                     r.get('QSLRCD','').upper()=='Y') else 0
+        conf = 1 if is_confirmed(r) else 0
         grp  = mode_group_fn(mode)
         data.setdefault(key, []).append([grp_idx(grp), band_idx(band), conf])
 
@@ -598,16 +595,6 @@ def _build_overlay_qso_data(records: list, key_fn,
 # ---------------------------------------------------------------------------
 # Grid square overlay  (pure Python / GeoJSON)
 # ---------------------------------------------------------------------------
-
-# Per-overlay color palettes — each overlay type has its own confirmed/worked pair
-# so multiple overlays on the same map are visually distinguishable.
-OVERLAY_COLORS = {
-    'confirmed': '#2ecc71',   # green  (states default / backwards compat)
-    'worked':    '#f39c12',   # amber
-}
-STATES_COLORS  = {'confirmed': '#2ecc71', 'worked': '#f39c12'}  # green / amber
-COUNTIES_COLORS = {'confirmed': '#1a8a4a', 'worked': '#c0720a'}  # dark green / burnt amber
-GRIDS_COLORS    = {'confirmed': '#e67e22', 'worked': '#f7dc6f'}  # orange / yellow
 
 def _grid4_polygon(grid4: str) -> list:
     """Return a closed GeoJSON ring for a 4-char Maidenhead grid square."""
@@ -1184,23 +1171,6 @@ setTimeout(function() {{
     }}
 
     // ── Overlay recompute ──────────────────────────────────────
-    function computeStatus(qsos) {{
-        // qsos: array of [grpIdx, bandIdx, confirmed]
-        // Returns 'confirmed'|'worked'|null based on active modes+bands
-        var hasWorked = false, hasConfirmed = false;
-        for (var i=0; i<qsos.length; i++) {{
-            var q = qsos[i];
-            var grpName  = overlayDyn[Object.keys(overlayDyn)[0]]
-                            ? null : null; // resolved per-overlay below
-            var confirmed = q[2];
-            // We store indices per overlay — handled in recomputeOverlay
-            if (confirmed) hasConfirmed = true; else hasWorked = true;
-        }}
-        if (hasConfirmed) return 'confirmed';
-        if (hasWorked)    return 'worked';
-        return null;
-    }}
-
     function computeStatus(qsos, grpIdx, bndIdx) {{
         var hasConf = false, hasWork = false;
         for (var i=0; i<qsos.length; i++) {{
