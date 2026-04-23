@@ -84,17 +84,20 @@ _THEME_DEFAULTS = {
             "confirmed": "#2ecc71", "worked": "#f39c12",
             "border_confirmed": "#1a7a45", "border_worked": "#b8860b",
             "confirmed_weight": 2.0, "worked_weight": 2.0,
+            "fill_opacity": 0.35,
             "unworked_fill": "#ffffff", "unworked_border": "#666666",
             "unworked_weight": 0.8, "unworked_opacity": 0.0,
         },
         "counties": {
             "confirmed": "#1a8a4a", "worked": "#c0720a",
             "border_confirmed": "#0d4d28", "border_worked": "#7d4e07",
+            "fill_opacity": 0.55,
             "unworked_fill": "#ffffff", "unworked_border": "#888888",
             "unworked_weight": 0.5, "unworked_opacity": 0.0,
         },
         "grids": {
-            "confirmed": "#e67e22", "worked": "#f7dc6f",
+            "confirmed": "#27ae9e", "worked": "#e8a020",
+            "fill_opacity": 0.45,
         },
     },
 }
@@ -522,7 +525,8 @@ def build_map(my_coords, records, show_arcs: bool,
             var count = cluster.getChildCount();
             var size  = count < 10 ? 28 : count < 100 ? 36 : 44;
             return L.divIcon({
-                html: '<div style="background:rgba(80,80,80,0.75);color:#fff;'
+                html: '<div title="' + count + ' contacts"'
+                    + ' style="background:rgba(80,80,80,0.75);color:#fff;'
                     + 'border-radius:50%;width:' + size + 'px;height:' + size + 'px;'
                     + 'display:flex;align-items:center;justify-content:center;'
                     + 'font-weight:bold;font-size:12px;border:2px solid #fff;">'
@@ -775,13 +779,14 @@ def build_grid_overlay(m, records: list, dynamic: bool = False,
 
     geojson = {'type': 'FeatureCollection', 'features': features}
 
+    _grid_opacity = GRIDS_COLORS.get('fill_opacity', 0.45)
     def style_fn(feature):
         color = colors.get(feature['properties']['status'], '#888888')
         return {
             'fillColor':   color,
             'color':       color,
             'weight':      1,
-            'fillOpacity': 0.45,
+            'fillOpacity': _grid_opacity,
         }
 
     fg  = folium.FeatureGroup(name='Overlay: Grid squares', show=True)
@@ -884,18 +889,17 @@ def build_states_overlay(m, records: list, dynamic: bool = False,
                 'fillColor':   cfg.get('unworked_fill',   '#ffffff'),
                 'color':       cfg.get('unworked_border', '#666666'),
                 'weight':      cfg.get('unworked_weight', 0.8),
-                'fillOpacity': 0.12,
+                'fillOpacity': cfg.get('unworked_opacity', 0.0),
             }
         status = info['status']
         fill   = cfg.get(status, '#888888')
         border = cfg.get(f'border_{status}', fill)
-        w_key = f'weight'  # fallback
-        w     = cfg.get(f'{status}_weight', cfg.get('confirmed_weight', 2.0))
+        w      = cfg.get(f'{status}_weight', cfg.get('confirmed_weight', 2.0))
         return {
             'fillColor':   fill,
             'color':       border,
             'weight':      w,
-            'fillOpacity': 0.45,
+            'fillOpacity': cfg.get('fill_opacity', 0.45),
         }
 
     def tooltip_fn(feature):
@@ -1007,7 +1011,7 @@ def build_counties_overlay(m, records: list, dynamic: bool = False,
             'fillColor':   colors.get(info, '#888888'),
             'color':       BORDER_COLORS.get(info, '#333333'),
             'weight':      1.2,
-            'fillOpacity': 0.55,
+            'fillOpacity': COUNTIES_COLORS.get('fill_opacity', 0.55),
         }
 
     fg  = folium.FeatureGroup(name='Overlay: Counties', show=True)
@@ -1107,6 +1111,7 @@ def inject_toggle_panel(m, filtered_records: list, layer_meta: dict) -> None:
             'border_worked':    STATES_COLORS.get('border_worked',    '#b8860b'),
             'confirmed_weight': STATES_COLORS.get('confirmed_weight', 2.0),
             'worked_weight':    STATES_COLORS.get('worked_weight',    2.0),
+            'fill_opacity':     STATES_COLORS.get('fill_opacity',     0.35),
             'unworked_fill':    STATES_COLORS.get('unworked_fill',    '#ffffff'),
             'unworked_border':  STATES_COLORS.get('unworked_border',  '#666666'),
             'unworked_weight':  STATES_COLORS.get('unworked_weight',  0.8),
@@ -1116,13 +1121,15 @@ def inject_toggle_panel(m, filtered_records: list, layer_meta: dict) -> None:
             'worked':    COUNTIES_COLORS.get('worked',    '#c0720a'),
             'border_confirmed': COUNTIES_COLORS.get('border_confirmed', '#0d4d28'),
             'border_worked':    COUNTIES_COLORS.get('border_worked',    '#7d4e07'),
+            'fill_opacity':     COUNTIES_COLORS.get('fill_opacity',     0.55),
             'unworked_fill':    COUNTIES_COLORS.get('unworked_fill',    '#ffffff'),
             'unworked_border':  COUNTIES_COLORS.get('unworked_border',  '#888888'),
             'unworked_weight':  COUNTIES_COLORS.get('unworked_weight',  0.5),
         },
         'grids': {
-            'confirmed': GRIDS_COLORS.get('confirmed', '#e67e22'),
-            'worked':    GRIDS_COLORS.get('worked',    '#f7dc6f'),
+            'confirmed':  GRIDS_COLORS.get('confirmed',   '#27ae9e'),
+            'worked':     GRIDS_COLORS.get('worked',      '#e8a020'),
+            'fill_opacity': GRIDS_COLORS.get('fill_opacity', 0.45),
         },
     })
 
@@ -1305,13 +1312,14 @@ setTimeout(function() {{
     }}
 
     function styleForStatus(status, tc) {{
+        var op = tc.fill_opacity != null ? tc.fill_opacity : 0.45;
         if (status === 'confirmed') return {{
             fillColor: tc.confirmed, color: tc.border_confirmed || tc.confirmed,
-            weight: tc.confirmed_weight || 2.0, fillOpacity: 0.45,
+            weight: tc.confirmed_weight || 2.0, fillOpacity: op,
         }};
         if (status === 'worked') return {{
             fillColor: tc.worked, color: tc.border_worked || tc.worked,
-            weight: tc.worked_weight || 2.0, fillOpacity: 0.45,
+            weight: tc.worked_weight || 2.0, fillOpacity: op,
         }};
         return {{
             fillColor: tc.unworked_fill || '#ffffff',
@@ -1675,6 +1683,12 @@ def main():
             overlay_meta['grids'] = result
     if overlays:
         add_overlay_legend(m, overlays)
+
+    # Auto-frame to US + Canada when states or counties overlay is active.
+    # Bounds: SW corner (24°N, 170°W) to NE corner (84°N, 50°W)
+    # Alaska pulls the northwest far enough to include most of Canada.
+    if ('states' in overlays or 'counties' in overlays) and overlays != ['grids']:
+        m.fit_bounds([[24, -170], [66, -50]])
 
     # Inject mode filter panel (must come after overlays so var names exist)
     if args.show_filters:
