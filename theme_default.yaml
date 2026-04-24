@@ -10,7 +10,7 @@
 # Useful if your contacts are spread across the antimeridian — e.g. a West
 # Coast US station with contacts in both Europe and Asia/Pacific should shift
 # west so both sides are visible on load. Set to 0 to center on your station.
-map_center_lon_offset: 0
+map_center_lon_offset: -122
 
 # ---------------------------------------------------------------------------
 # Contact dot style
