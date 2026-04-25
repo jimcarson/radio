@@ -28,7 +28,7 @@ Options:
     --output FILE           Output HTML filename (default: map_output.html next to input file)
 """
 
-__version__ = "1.1.0"  # county key title-case fix; refactored to use map_core
+__version__ = "1.2.0"  # De-prefix county name normalisation for LoTW/GSAK alignment
 
 import argparse
 import sys
@@ -1026,9 +1026,24 @@ def main():
         if not cnty or ',' not in cnty: return ''
         state, name = cnty.split(',',1)
         name = _re.sub(r'\s+(County|Parish|Borough|Census Area|Municipality)\s*$','',name.strip(),flags=_re.IGNORECASE).strip()
-        # Normalise to title case — LoTW exports county names in ALL CAPS,
-        # which must match the title-case adif_key values in us_counties.geojson
-        return f"{state.upper()},{name.title()}"
+        # Normalise to title case — LoTW exports county names in ALL CAPS
+        name = name.title()
+        # Normalise known LoTW/GSAK spelling differences.
+        # LoTW uses "De Kalb", "De Soto" (TX/FL/MS), "De Witt" as two words;
+        # GSAK stores them as one word. Apply per-state to avoid breaking
+        # Louisiana "De Soto" (Parish) which correctly stays two words.
+        _DEFIX = {
+            ('AL','De Kalb'):('AL','DeKalb'), ('GA','De Kalb'):('GA','DeKalb'),
+            ('IL','De Kalb'):('IL','DeKalb'), ('IN','De Kalb'):('IN','DeKalb'),
+            ('MO','De Kalb'):('MO','DeKalb'), ('TN','De Kalb'):('TN','DeKalb'),
+            ('FL','De Soto'):('FL','DeSoto'), ('MS','De Soto'):('MS','DeSoto'),
+            ('TX','De Witt'):('TX','DeWitt'),
+        }
+        st = state.upper()
+        fix = _DEFIX.get((st, name))
+        if fix:
+            st, name = fix
+        return f"{st},{name}"
     def _grid_key(r):
         g = r.get('GRIDSQUARE','')[:4].upper()
         return g if len(g)==4 else ''

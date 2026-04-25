@@ -1,0 +1,47 @@
+CREDITS
+=======
+
+County / Regional Polygon Data
+-------------------------------
+The county and regional boundary polygon files used by this project
+(gsak_counties.db, us_counties.geojson) were derived from polygon data
+distributed with GSAK (Geocaching Swiss Army Knife).
+
+GSAK was written by Clyde Findlay and released as freeware after he was
+no longer able to maintain it following a stroke. The polygon files
+themselves are a community effort — contributed and refined by GSAK users
+over many years.
+
+  GSAK website : https://gsak.net
+  License      : Freeware
+
+We are grateful to Clyde and to the GSAK community for making this data
+freely available.
+
+
+Mapping Infrastructure
+----------------------
+Interactive maps are rendered using Folium (https://python-visualization.github.io/folium/),
+a Python wrapper around the Leaflet.js mapping library.
+
+Map tiles are provided by:
+  - CartoDB   : https://carto.com/attributions
+  - Esri      : https://www.esri.com
+  - OpenStreetMap contributors : https://www.openstreetmap.org/copyright
+
+State and province boundary data for the overlay border layer is derived
+from Natural Earth (https://www.naturalearthdata.com), a public domain
+map dataset.
+
+
+Amateur Radio Log Data
+----------------------
+QSO data is sourced from the operator's own logs exported from:
+  - Logbook of the World (LoTW) : https://lotw.arrl.org
+  - QRZ.com                     : https://www.qrz.com
+
+Geocaching Data
+---------------
+Geocache data is exported from Geocaching.com via GSAK.
+Geocaching.com is a trademark of Groundspeak, Inc.
+  https://www.geocaching.com

@@ -18,7 +18,7 @@ Dependencies:
 
 from pathlib import Path
 
-__version__ = "1.1.0"  # closure fix; county name title-case via key_fn
+__version__ = "1.2.0"  # county/state/grid count tooltips; state border lines layer
 
 try:
     import yaml
@@ -267,19 +267,23 @@ def grid4_polygon(grid4: str) -> list:
 # Overlay data helpers
 # ---------------------------------------------------------------------------
 
-def classify_records(records: list, key_fn) -> tuple[dict, dict]:
+def classify_records(records: list, key_fn) -> tuple[dict, dict, dict, dict]:
     """
-    Build status and count dicts from a list of records.
+    Build status and per-state count dicts from a list of records.
 
     key_fn(record) -> str key (empty string = skip)
-    confirmed_fn(record) -> bool — defaults to always False (all "worked")
+    Records must have '_confirmed' key (bool).
 
     Returns:
-        status : {key -> 'confirmed' | 'worked'}
-        counts : {key -> int}
+        status          : {key -> 'confirmed' | 'worked'}
+        counts          : {key -> total int}
+        confirmed_counts: {key -> confirmed int}
+        worked_counts   : {key -> worked int}
     """
-    status: dict = {}
-    counts: dict = {}
+    status:           dict = {}
+    counts:           dict = {}
+    confirmed_counts: dict = {}
+    worked_counts:    dict = {}
     for r in records:
         key = key_fn(r)
         if not key:
@@ -288,9 +292,12 @@ def classify_records(records: list, key_fn) -> tuple[dict, dict]:
         counts[key] = counts.get(key, 0) + 1
         if confirmed:
             status[key] = 'confirmed'
-        elif key not in status:
-            status[key] = 'worked'
-    return status, counts
+            confirmed_counts[key] = confirmed_counts.get(key, 0) + 1
+        else:
+            if key not in status:
+                status[key] = 'worked'
+            worked_counts[key] = worked_counts.get(key, 0) + 1
+    return status, counts, confirmed_counts, worked_counts
 
 
 def build_overlay_qso_data(records: list, key_fn,
@@ -383,7 +390,7 @@ def build_grid_overlay(m: folium.Map, records: list,
     kfn = key_fn or _default_key
 
     # Tag confirmed flag onto records for classify_records
-    status, counts = classify_records(records, kfn)
+    status, counts, conf_counts, work_counts = classify_records(records, kfn)
     if not status:
         print("  Grid overlay: no grid data found — skipping.")
         return {}
@@ -394,12 +401,14 @@ def build_grid_overlay(m: folium.Map, records: list,
             ring = grid4_polygon(grid)
         except Exception:
             continue
-        n = counts.get(grid, 0)
+        nc = conf_counts.get(grid, 0)
+        nw = work_counts.get(grid, 0)
+        tip = f"{grid} — Confirmed: {nc} | Worked: {nw}"
         features.append({
             'type': 'Feature',
             'properties': {
-                'grid': grid, 'key': grid, 'status': state, 'count': n,
-                'tooltip': f"{grid} — {state} ({n})",
+                'grid': grid, 'key': grid, 'status': state,
+                'count': nc + nw, 'tooltip': tip,
             },
             'geometry': {'type': 'Polygon', 'coordinates': [ring]},
         })
@@ -422,6 +431,7 @@ def build_grid_overlay(m: folium.Map, records: list,
     confirmed_n = sum(1 for s in status.values() if s == 'confirmed')
     worked_n    = sum(1 for s in status.values() if s == 'worked')
     print(f"  Grid overlay: {confirmed_n} confirmed, {worked_n} worked-only squares.")
+    _add_state_borders(m)
 
     if dynamic and group_fn and band_fn:
         dyn_data, grp_index, band_index = build_overlay_qso_data(
@@ -429,6 +439,54 @@ def build_grid_overlay(m: folium.Map, records: list,
         return {'var_name': gjl.get_name(), 'data': dyn_data,
                 'grp_index': grp_index, 'band_index': band_index}
     return {}
+
+
+
+# ---------------------------------------------------------------------------
+# State border lines overlay (thin black lines, no fill, non-interactive)
+# Automatically added whenever any choropleth overlay is active.
+# ---------------------------------------------------------------------------
+
+_state_borders_added: set = set()   # track per-map object id to avoid duplicates
+
+
+def _add_state_borders(m: folium.Map, cache_path: Path = None) -> None:
+    """
+    Add a thin state/province boundary line layer to the map.
+    Uses ne_states.geojson (already required for the states choropleth).
+    Safe to call multiple times on the same map — adds only once.
+    No fill, no tooltip — purely for visual geographic orientation.
+    """
+    import json
+    map_id = id(m)
+    if map_id in _state_borders_added:
+        return
+    _state_borders_added.add(map_id)
+
+    geo_path = cache_path or _STATES_CACHE
+    if not geo_path.exists():
+        return  # silently skip — caller already warns if file is missing
+
+    try:
+        geojson = json.loads(geo_path.read_text(encoding="utf-8"))
+    except Exception:
+        return
+
+    def border_style(_feature):
+        return {
+            'fillColor':   '#000000',
+            'fillOpacity': 0.0,
+            'color':       '#333333',
+            'weight':      1.2,
+        }
+
+    fg = folium.FeatureGroup(name='State/Province borders', show=True)
+    folium.GeoJson(
+        geojson,
+        style_function=border_style,
+        tooltip=None,
+    ).add_to(fg)
+    fg.add_to(m)
 
 
 # ---------------------------------------------------------------------------
@@ -472,15 +530,28 @@ def build_states_overlay(m: folium.Map, records: list,
     us_kfn = us_key_fn or _default_us
     ca_kfn = ca_key_fn or _default_ca
 
-    us_status, us_counts = classify_records(records, us_kfn)
-    ca_status, ca_counts = classify_records(records, ca_kfn)
+    us_status, us_counts, us_conf_c, us_work_c = classify_records(records, us_kfn)
+    ca_status, ca_counts, ca_conf_c, ca_work_c = classify_records(records, ca_kfn)
     us_status.pop('', None); us_counts.pop('', None)
     ca_status.pop('', None); ca_counts.pop('', None)
+    us_conf_c.pop('', None); us_work_c.pop('', None)
+    ca_conf_c.pop('', None); ca_work_c.pop('', None)
 
     lookup = {}
     for code, state in {**us_status, **ca_status}.items():
-        cnt = us_counts if code in us_status else ca_counts
-        lookup[code] = {'status': state, 'count': cnt.get(code, 0)}
+        cc = (us_conf_c if code in us_status else ca_conf_c).get(code, 0)
+        wc = (us_work_c if code in us_status else ca_work_c).get(code, 0)
+        lookup[code] = {'status': state, 'conf': cc, 'work': wc}
+
+    # Embed tooltip into GeoJSON properties so GeoJsonTooltip can access it
+    for feat in geojson['features']:
+        postal = (feat['properties'].get('postal') or '').upper()
+        info   = lookup.get(postal)
+        if info:
+            feat['properties']['_tip'] = (
+                f"Confirmed: {info['conf']} | Worked: {info['work']}")
+        else:
+            feat['properties']['_tip'] = ''
 
     us_conf = sum(1 for c, s in lookup.items() if s['status']=='confirmed' and c in us_status)
     us_work = sum(1 for c, s in lookup.items() if s['status']=='worked'    and c in us_status)
@@ -499,11 +570,14 @@ def build_states_overlay(m: folium.Map, records: list,
         geojson,
         style_function=style_fn,
         tooltip=folium.GeoJsonTooltip(
-            fields=['postal', 'name'], aliases=['Code', 'Name'], localize=True,
+            fields=['postal', 'name', '_tip'],
+            aliases=['Code', 'Name', 'Counts'],
+            localize=True,
         ),
     )
     gjl.add_to(fg)
     fg.add_to(m)
+    _add_state_borders(m)
 
     if dynamic and group_fn and band_fn:
         def combined_key(r):
@@ -552,13 +626,21 @@ def build_counties_overlay(m: folium.Map, records: list,
     def _default_key(r): return ''
     kfn = key_fn or _default_key
 
-    status, counts = classify_records(records, kfn)
+    status, counts, conf_counts, work_counts = classify_records(records, kfn)
     status.pop('', None); counts.pop('', None)
+    conf_counts.pop('', None); work_counts.pop('', None)
+
+    # Embed per-county counts into GeoJSON properties for tooltip
+    for feat in geojson['features']:
+        key = feat['properties'].get('adif_key', '')
+        nc  = conf_counts.get(key, 0)
+        nw  = work_counts.get(key, 0)
+        feat['properties']['_tip'] = (
+            f"Confirmed: {nc} | Worked: {nw}" if (nc or nw) else '')
 
     confirmed_n = sum(1 for s in status.values() if s == 'confirmed')
     worked_n    = sum(1 for s in status.values() if s == 'worked')
     print(f"  County overlay: {confirmed_n} confirmed, {worked_n} worked-only counties.")
-    print(f"  County overlay: COUNTIES_COLORS fill_opacity={COUNTIES_COLORS.get('fill_opacity','MISSING')}, sample keys={list(status.keys())[:3]}")
 
     def style_fn(feature):
         key  = feature['properties'].get('adif_key', '')
@@ -570,13 +652,14 @@ def build_counties_overlay(m: folium.Map, records: list,
         geojson,
         style_function=style_fn,
         tooltip=folium.GeoJsonTooltip(
-            fields=['namelsad', 'state', 'adif_key'],
-            aliases=['County', 'State', 'ADIF key'],
+            fields=['namelsad', 'state', 'adif_key', '_tip'],
+            aliases=['County', 'State', 'ADIF key', 'Counts'],
             localize=True,
         ),
     )
     gjl.add_to(fg)
     fg.add_to(m)
+    _add_state_borders(m)
 
     if dynamic and group_fn and band_fn:
         dyn_data, grp_index, band_index = build_overlay_qso_data(
