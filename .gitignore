@@ -1,5 +1,9 @@
-*.key
 __pycache__
 resolved_log.csv
+*.key
 *.html 
 *.adi
+old
+wt8p.*
+tofix.csv
+.gitignore
