@@ -29,7 +29,7 @@ Usage:
 Dependencies: stdlib only (sqlite3, json, pathlib, argparse)
 """
 
-__version__ = "1.1.0"  # default simplify=0.0005; --full flag for fidelity
+__version__ = "1.2.0"  # IDL fix: normalize longitudes, MultiPolygon for island chains
 
 import argparse
 import json
@@ -172,6 +172,59 @@ def simplify_polygon(pts: list, epsilon: float) -> list:
 
 
 # ---------------------------------------------------------------------------
+# International Date Line helpers
+# ---------------------------------------------------------------------------
+
+def normalize_lon(lon: float) -> float:
+    """
+    Shift East longitudes > 170° into the Western hemisphere by subtracting
+    360°.  This keeps island-chain polygons (e.g. Aleutians West) entirely
+    in negative-longitude space so renderers don't draw cross-globe lines.
+
+    170° is chosen as the threshold because no US territory sits between
+    170°E and 180°E on the Western side — everything east of 170°E that
+    belongs to Alaska is geographically west of the IDL and should be
+    expressed as a negative longitude.
+    """
+    return lon - 360.0 if lon > 170.0 else lon
+
+
+def split_sub_polygons(pts: list) -> list[list]:
+    """
+    A GSAK polygon entry may concatenate multiple closed rings end-to-end
+    (each ring closes back to its own first point before the next ring
+    begins).  Split them into separate lists of (lat, lon) tuples.
+
+    Returns a list of rings; each ring is a closed list of (lat, lon) tuples.
+    If no closing point is found for a ring the remaining points are returned
+    as a single unclosed ring (the GeoJSON builder will close it).
+    """
+    if not pts:
+        return []
+
+    rings = []
+    start = 0
+
+    while start < len(pts):
+        first = tuple(pts[start])
+        closed = False
+        for i in range(start + 1, len(pts)):
+            if tuple(pts[i]) == first:
+                rings.append(pts[start : i + 1])
+                start = i + 1
+                closed = True
+                break
+        if not closed:
+            # No closing point found — treat the remainder as one ring
+            remainder = pts[start:]
+            if len(remainder) >= 3:
+                rings.append(remainder)
+            break
+
+    return rings if rings else [pts]
+
+
+# ---------------------------------------------------------------------------
 # GeoJSON generation
 # ---------------------------------------------------------------------------
 
@@ -226,19 +279,42 @@ def build_geojson(db_path: Path, epsilon: float = 0.0,
 
         orig_pts_total += len(pts)
 
-        # Simplify if requested
-        if epsilon > 0:
-            pts = simplify_polygon(pts, epsilon)
-        simp_pts_total += len(pts)
+        # Split concatenated sub-polygons (e.g. Aleutians West island chain)
+        rings_raw = split_sub_polygons(pts)
 
-        # GeoJSON coordinates are [lon, lat]
-        coords = [[pt[1], pt[0]] for pt in pts]
+        # Simplify each ring, normalize IDL longitudes, convert to [lon, lat]
+        rings_geo = []
+        for ring in rings_raw:
+            simp = simplify_polygon(ring, epsilon) if epsilon > 0 else ring
+            simp_pts_total += len(simp)
+            # Normalize East longitudes > 170° → negative (Western hemisphere)
+            coords = [[normalize_lon(pt[1]), pt[0]] for pt in simp]
+            # Ensure closed ring
+            if coords[0] != coords[-1]:
+                coords.append(coords[0])
+            if len(coords) >= 4:  # GeoJSON requires at least 4 positions
+                rings_geo.append(coords)
 
-        # Ensure closed ring
-        if coords[0] != coords[-1]:
-            coords.append(coords[0])
+        if not rings_geo:
+            if verbose:
+                print(f"  Warning: {adif_key} produced no valid rings — skipped.")
+            skipped += 1
+            continue
 
         namelsad = make_namelsad(name, state)
+
+        # Use MultiPolygon when there are multiple islands/sub-regions
+        if len(rings_geo) == 1:
+            geometry = {
+                'type':        'Polygon',
+                'coordinates': [rings_geo[0]],
+            }
+        else:
+            geometry = {
+                'type':        'MultiPolygon',
+                # Each element of MultiPolygon coordinates is [[outer_ring]]
+                'coordinates': [[ring] for ring in rings_geo],
+            }
 
         features.append({
             'type': 'Feature',
@@ -248,10 +324,7 @@ def build_geojson(db_path: Path, epsilon: float = 0.0,
                 'namelsad': namelsad,
                 'state':    state,
             },
-            'geometry': {
-                'type':        'Polygon',
-                'coordinates': [coords],
-            },
+            'geometry': geometry,
         })
 
     if verbose and epsilon > 0:
@@ -327,13 +400,13 @@ Examples:
     out_path = Path(args.out).expanduser().resolve()
 
     print(f"Reading from: {db_path}")
+    if args.full:
+        args.simplify = 0.0
+
     if args.simplify > 0:
         print(f"Simplification: ε={args.simplify} (RDP)")
     else:
         print("Simplification: none (full fidelity)")
-
-    if args.full:
-        args.simplify = 0.0
 
     t0 = time.time()
     geojson = build_geojson(db_path, epsilon=args.simplify, verbose=args.verbose)
