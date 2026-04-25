@@ -28,17 +28,12 @@ Options:
     --output FILE           Output HTML filename (default: map_output.html next to input file)
 """
 
+__version__ = "1.1.0"  # county key title-case fix; refactored to use map_core
+
 import argparse
-import math
 import sys
 import webbrowser
 from pathlib import Path
-
-try:
-    import yaml
-    _YAML_AVAILABLE = True
-except ImportError:
-    _YAML_AVAILABLE = False
 
 try:
     import folium
@@ -58,112 +53,20 @@ except ImportError:
         "Missing qrz_common.py — ensure it is in the same directory as adif_map.py."
     )
 
+try:
+    import map_core
+    from map_core import (
+        load_theme, build_base_map, gc_points, grid4_polygon,
+        build_grid_overlay, build_states_overlay, build_counties_overlay,
+        add_overlay_legend, theme_colors_js_dict,
+        BAND_COLORS, DEFAULT_COLOR, STATES_COLORS, COUNTIES_COLORS,
+        GRIDS_COLORS, MAP_LON_OFFSET, CONTACT_DOT,
+    )
+except ImportError:
+    sys.exit(
+        "Missing map_core.py — ensure it is in the same directory as adif_map.py."
+    )
 
-# ---------------------------------------------------------------------------
-# Theme / color configuration
-# ---------------------------------------------------------------------------
-
-_THEME_DEFAULTS = {
-    "band_colors": {
-        "160m": "#8B0000", "80m": "#CC2200", "60m": "#DD4400",
-        "40m":  "#FF6600", "30m": "#FF9900", "20m": "#FFD700",
-        "17m":  "#AACC00", "15m": "#44BB00", "12m": "#00AAAA",
-        "10m":  "#0077DD", "6m":  "#5500DD", "2m":  "#AA00CC",
-        "70cm": "#CC00AA",
-    },
-    "default_color": "#888888",
-    "map_center_lon_offset": 0,    # degrees; shift initial view west (negative) or east (positive)
-    "contact_dot": {
-        "radius": 6,
-        "fill_opacity": 0.85,
-        "border_color": "white",
-        "border_weight": 1.2,
-    },
-    "overlay": {
-        "states":   {
-            "confirmed": "#2ecc71", "worked": "#f39c12",
-            "border_confirmed": "#1a7a45", "border_worked": "#b8860b",
-            "confirmed_weight": 2.0, "worked_weight": 2.0,
-            "fill_opacity": 0.35,
-            "unworked_fill": "#ffffff", "unworked_border": "#666666",
-            "unworked_weight": 0.8, "unworked_opacity": 0.0,
-        },
-        "counties": {
-            "confirmed": "#1a8a4a", "worked": "#c0720a",
-            "border_confirmed": "#0d4d28", "border_worked": "#7d4e07",
-            "fill_opacity": 0.55,
-            "unworked_fill": "#ffffff", "unworked_border": "#888888",
-            "unworked_weight": 0.5, "unworked_opacity": 0.0,
-        },
-        "grids": {
-            "confirmed": "#27ae9e", "worked": "#e8a020",
-            "fill_opacity": 0.45,
-        },
-    },
-}
-
-# Populated by load_theme() called from main()
-BAND_COLORS:     dict = {}
-DEFAULT_COLOR:   str  = "#888888"
-OVERLAY_COLORS:  dict = {"confirmed": "#2ecc71", "worked": "#f39c12"}
-STATES_COLORS:   dict = {}
-COUNTIES_COLORS: dict = {}
-GRIDS_COLORS:    dict = {}
-MAP_LON_OFFSET:  float = 0.0    # populated by load_theme()
-
-
-def load_theme(theme_path=None) -> None:
-    """
-    Load color theme from a YAML file into module-level color constants.
-    Falls back to _THEME_DEFAULTS if file not found or yaml not installed.
-    theme_path: Path or str, or None to use theme_default.yaml beside this script.
-    """
-    global BAND_COLORS, DEFAULT_COLOR, OVERLAY_COLORS
-    global STATES_COLORS, COUNTIES_COLORS, GRIDS_COLORS, MAP_LON_OFFSET
-
-    theme = dict(_THEME_DEFAULTS)
-
-    if theme_path is None:
-        theme_path = Path(__file__).parent / "theme_default.yaml"
-    else:
-        theme_path = Path(theme_path)
-
-    if theme_path.exists():
-        if not _YAML_AVAILABLE:
-            print(f"  Warning: pyyaml not installed — using built-in defaults.")
-            print(f"    pip install pyyaml")
-        else:
-            try:
-                with theme_path.open(encoding="utf-8") as f:
-                    loaded = yaml.safe_load(f)
-                if loaded:
-                    # Deep-merge: overlay sub-keys are merged individually
-                    if "map_center_lon_offset" in loaded:
-                        theme["map_center_lon_offset"] = loaded["map_center_lon_offset"]
-                    if "band_colors" in loaded:
-                        theme["band_colors"].update(loaded["band_colors"])
-                    if "default_color" in loaded:
-                        theme["default_color"] = loaded["default_color"]
-                    if "overlay" in loaded:
-                        for key, vals in loaded["overlay"].items():
-                            if key in theme["overlay"]:
-                                theme["overlay"][key].update(vals)
-                            else:
-                                theme["overlay"][key] = vals
-                print(f"  Theme loaded: {theme_path.name}")
-            except Exception as exc:
-                print(f"  Warning: could not load theme {theme_path}: {exc}")
-    elif theme_path.name != "theme_default.yaml":
-        print(f"  Warning: theme file not found: {theme_path}")
-
-    BAND_COLORS    = theme["band_colors"]
-    DEFAULT_COLOR  = theme["default_color"]
-    STATES_COLORS  = theme["overlay"]["states"]
-    COUNTIES_COLORS= theme["overlay"]["counties"]
-    GRIDS_COLORS   = theme["overlay"]["grids"]
-    OVERLAY_COLORS = {"confirmed": STATES_COLORS["confirmed"],
-                      "worked":    STATES_COLORS["worked"]}
-    MAP_LON_OFFSET = float(theme.get("map_center_lon_offset", 0))
 
 
 # ---------------------------------------------------------------------------
@@ -242,67 +145,6 @@ def _resolve_my_coords_for_record(record: dict):
     return None
 
 
-# ---------------------------------------------------------------------------
-# Great-circle arc interpolation
-# ---------------------------------------------------------------------------
-def _gc_points(p1, p2, n=32):
-    """
-    Return great-circle points between p1 and p2 as a list of segments.
-
-    Longitudes are first unwrapped into a continuous chain (which may
-    temporarily exceed ±180°), then renormalised and split at any
-    antimeridian crossing so each segment stays within [-180, 180].
-    Leaflet renders one PolyLine per segment; callers must iterate.
-    """
-    lat1, lon1 = math.radians(p1[0]), math.radians(p1[1])
-    lat2, lon2 = math.radians(p2[0]), math.radians(p2[1])
-    d = 2 * math.asin(math.sqrt(
-        math.sin((lat2 - lat1) / 2) ** 2 +
-        math.cos(lat1) * math.cos(lat2) * math.sin((lon2 - lon1) / 2) ** 2
-    ))
-    if d < 1e-9:
-        return [[p1, p2]]
-
-    pts = []
-    for i in range(n + 1):
-        f = i / n
-        A = math.sin((1 - f) * d) / math.sin(d)
-        B = math.sin(f * d) / math.sin(d)
-        x = A * math.cos(lat1) * math.cos(lon1) + B * math.cos(lat2) * math.cos(lon2)
-        y = A * math.cos(lat1) * math.sin(lon1) + B * math.cos(lat2) * math.sin(lon2)
-        z = A * math.sin(lat1) + B * math.sin(lat2)
-        lat = math.degrees(math.atan2(z, math.sqrt(x**2 + y**2)))
-        lon = math.degrees(math.atan2(y, x))
-        pts.append([lat, lon])
-
-    # Unwrap into a continuous chain (may go outside [-180, 180])
-    for i in range(1, len(pts)):
-        diff = pts[i][1] - pts[i - 1][1]
-        if diff > 180:
-            pts[i][1] -= 360
-        elif diff < -180:
-            pts[i][1] += 360
-
-    # Split into Leaflet-renderable segments at antimeridian crossings.
-    # Renormalise each point into [-180, 180]; start a new segment whenever
-    # normalisation causes a jump > 170° from the previous normalised point.
-    segments = []
-    current = []
-    for pt in pts:
-        lat, lon = pt
-        norm_lon = lon
-        while norm_lon > 180:
-            norm_lon -= 360
-        while norm_lon < -180:
-            norm_lon += 360
-        if current and abs(norm_lon - current[-1][1]) > 170:
-            segments.append(current)
-            current = []
-        current.append((lat, norm_lon))
-    if current:
-        segments.append(current)
-
-    return [s for s in segments if len(s) >= 2]
 
 # ---------------------------------------------------------------------------
 # Filtering
@@ -434,29 +276,7 @@ def build_map(my_coords, records, show_arcs: bool,
               arc_max: int = 1000, arc_cell_max: int = 2):
     from folium.plugins import MarkerCluster
 
-    m = folium.Map(
-        location=(my_coords[0], my_coords[1] + MAP_LON_OFFSET),
-        zoom_start=3,
-        tiles=None,
-    )
-
-    # Base tile layers — no API key required; all appear in the layer control.
-    # OSM omitted: their tile CDN blocks requests without a Referer header,
-    # which browsers cannot set on image tile fetches.
-    folium.TileLayer("CartoDB positron",    name="CartoDB Light").add_to(m)
-    folium.TileLayer("CartoDB dark_matter", name="CartoDB Dark").add_to(m)
-    folium.TileLayer(
-        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}",
-        attr="Esri", name="Esri Topo",
-    ).add_to(m)
-    folium.TileLayer(
-        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/NatGeo_World_Map/MapServer/tile/{z}/{y}/{x}",
-        attr="Esri / National Geographic", name="Esri NatGeo",
-    ).add_to(m)
-    folium.TileLayer(
-        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-        attr="Esri", name="Esri Satellite",
-    ).add_to(m)
+    m = build_base_map(my_coords[0], my_coords[1])
 
     # Operating location markers — one per unique MY_ position
     seen_origins = {}   # coords -> info dict for dedup
@@ -574,7 +394,7 @@ def build_map(my_coords, records, show_arcs: bool,
                 options={"maxClusterRadius": 40, "disableClusteringAtZoom": 9},
             ).add_to(fg)
 
-        _dot = _THEME_DEFAULTS.get("contact_dot", {})
+        _dot = CONTACT_DOT
         marker = folium.CircleMarker(
             location=coords,
             radius=_dot.get("radius", 6),
@@ -609,7 +429,7 @@ def build_map(my_coords, records, show_arcs: bool,
             conf   = "✓ confirmed" if is_confirmed(r) else ""
             tip    = f"{call} | {band} {mode} | {date} {conf}"
             # _gc_points returns a list of segments (split at antimeridian)
-            for seg in _gc_points(origin, coords):
+            for seg in gc_points(origin, coords):
                 folium.PolyLine(
                     locations=seg,
                     color=color,
@@ -642,397 +462,6 @@ def build_map(my_coords, records, show_arcs: bool,
     }
 
     return m, len(records) - skipped, layer_meta
-
-
-# ---------------------------------------------------------------------------
-# Overlay helpers
-# ---------------------------------------------------------------------------
-
-def _classify_contacts(records: list, key_fn) -> dict:
-    """
-    Build a status dict: entity_key -> 'confirmed' | 'worked'
-    key_fn(record) -> str key (e.g. 4-char grid, state abbr).
-    Returns only entities that appear in the records.
-    """
-    status: dict[str, str] = {}
-    counts: dict[str, int] = {}
-    for r in records:
-        key = key_fn(r)
-        if not key:
-            continue
-        confirmed = is_confirmed(r)
-        counts[key] = counts.get(key, 0) + 1
-        if confirmed:
-            status[key] = 'confirmed'
-        elif key not in status:
-            status[key] = 'worked'
-    return status, counts
-
-
-def _build_overlay_qso_data(records: list, key_fn,
-                             mode_group_fn) -> tuple[dict, list, list]:
-    """
-    Build a compact indexed QSO data structure for dynamic overlay updates.
-
-    Returns:
-        data       — {entity_key: [[grp_idx, band_idx, confirmed_int], ...]}
-        grp_index  — list of mode group names  (index -> name)
-        band_index — list of band names        (index -> name)
-
-    Using integer indices instead of repeated strings cuts JSON size ~75%.
-    """
-    grp_list  = []
-    band_list = []
-    grp_map   = {}
-    band_map  = {}
-
-    def grp_idx(g):
-        if g not in grp_map:
-            grp_map[g] = len(grp_list)
-            grp_list.append(g)
-        return grp_map[g]
-
-    def band_idx(b):
-        if b not in band_map:
-            band_map[b] = len(band_list)
-            band_list.append(b)
-        return band_map[b]
-
-    data: dict[str, list] = {}
-    for r in records:
-        key = key_fn(r)
-        if not key:
-            continue
-        mode = r.get('MODE', '').upper()
-        band = r.get('BAND', 'unknown').lower()
-        conf = 1 if is_confirmed(r) else 0
-        grp  = mode_group_fn(mode)
-        data.setdefault(key, []).append([grp_idx(grp), band_idx(band), conf])
-
-    return data, grp_list, band_list
-
-
-# ---------------------------------------------------------------------------
-# Grid square overlay  (pure Python / GeoJSON)
-# ---------------------------------------------------------------------------
-
-def _grid4_polygon(grid4: str) -> list:
-    """Return a closed GeoJSON ring for a 4-char Maidenhead grid square."""
-    g = grid4.upper()
-    lon = (ord(g[0]) - ord('A')) * 20 - 180
-    lat = (ord(g[1]) - ord('A')) * 10 - 90
-    lon += (ord(g[2]) - ord('0')) * 2
-    lat += (ord(g[3]) - ord('0')) * 1
-    return [
-        [lon,   lat],
-        [lon+2, lat],
-        [lon+2, lat+1],
-        [lon,   lat+1],
-        [lon,   lat],
-    ]
-
-
-def build_grid_overlay(m, records: list, dynamic: bool = False,
-                       mode_group_fn=None) -> dict:
-    """
-    Add a grid-square choropleth layer to the map.
-    When dynamic=True, embeds per-QSO data for JS recompute and returns
-    {'var_name': ..., 'data': ..., 'grp_index': ..., 'band_index': ...}.
-    """
-    colors = GRIDS_COLORS
-    import json
-
-    def grid_key(r):
-        g = r.get('GRIDSQUARE', '')[:4].upper()
-        return g if len(g) == 4 else ''
-
-    status, counts = _classify_contacts(records, grid_key)
-    if not status:
-        print("  Grid overlay: no GRIDSQUARE data found in records — skipping.")
-        return {}
-
-    # Build dynamic QSO data if requested
-    dyn_data = grp_index = band_index = None
-    if dynamic and mode_group_fn:
-        dyn_data, grp_index, band_index = _build_overlay_qso_data(
-            records, grid_key, mode_group_fn)
-
-    features = []
-    for grid, state in status.items():
-        try:
-            ring = _grid4_polygon(grid)
-        except Exception:
-            continue
-        n = counts.get(grid, 0)
-        props = {
-            'grid':    grid,
-            'key':     grid,
-            'status':  state,
-            'count':   n,
-            'tooltip': f"{grid} — {state} ({n} QSO{'s' if n != 1 else ''})",
-        }
-        features.append({
-            'type': 'Feature',
-            'properties': props,
-            'geometry': {'type': 'Polygon', 'coordinates': [ring]},
-        })
-
-    geojson = {'type': 'FeatureCollection', 'features': features}
-
-    _grid_opacity = GRIDS_COLORS.get('fill_opacity', 0.45)
-    def style_fn(feature):
-        color = colors.get(feature['properties']['status'], '#888888')
-        return {
-            'fillColor':   color,
-            'color':       color,
-            'weight':      1,
-            'fillOpacity': _grid_opacity,
-        }
-
-    fg  = folium.FeatureGroup(name='Overlay: Grid squares', show=True)
-    gjl = folium.GeoJson(
-        geojson,
-        style_function=style_fn,
-        tooltip=folium.GeoJsonTooltip(fields=['tooltip'], aliases=[''], labels=False),
-    )
-    gjl.add_to(fg)
-    fg.add_to(m)
-
-    confirmed_n = sum(1 for s in status.values() if s == 'confirmed')
-    worked_n    = sum(1 for s in status.values() if s == 'worked')
-    print(f"  Grid overlay: {confirmed_n} confirmed, {worked_n} worked-only squares.")
-
-    if dynamic:
-        return {'var_name': gjl.get_name(), 'data': dyn_data or {},
-                'grp_index': grp_index or [], 'band_index': band_index or []}
-    return {}
-
-
-
-# ---------------------------------------------------------------------------
-# States / provinces overlay  (reads cached ne_states.geojson)
-# ---------------------------------------------------------------------------
-
-# Cache file written by adif_setup.py — must be in the same dir as adif_map.py
-_STATES_CACHE = Path(__file__).parent / "ne_states.geojson"
-
-# DXCC entity codes
-_DXCC_US = '291'
-_DXCC_CA = '1'
-
-
-def _us_state_key(r: dict) -> str:
-    if r.get('DXCC', '') == _DXCC_US:
-        return r.get('STATE', '').upper().strip()[:2]
-    return ''
-
-
-def _ca_prov_key(r: dict) -> str:
-    if r.get('DXCC', '') == _DXCC_CA:
-        return r.get('STATE', '').upper().strip()[:2]
-    return ''
-
-
-def build_states_overlay(m, records: list, dynamic: bool = False,
-                         mode_group_fn=None) -> dict:
-    """
-    Add a US states + Canadian provinces choropleth layer.
-    Reads ne_states.geojson cached by adif_setup.py.
-    When dynamic=True, embeds per-QSO data for JS recompute.
-    """
-    colors = STATES_COLORS
-    import json
-
-    if not _STATES_CACHE.exists():
-        print(
-            "  States overlay: ne_states.geojson not found.\n"
-            "  Run  python adif_setup.py  once to download boundary data."
-        )
-        return {}
-
-    # Load cached boundary file
-    try:
-        geojson = json.loads(_STATES_CACHE.read_text(encoding="utf-8"))
-    except Exception as exc:
-        print(f"  States overlay: could not read {_STATES_CACHE.name}: {exc}")
-        return {}
-
-    # Build worked/confirmed lookup from filtered records
-    us_status, us_counts = _classify_contacts(records, _us_state_key)
-    ca_status, ca_counts = _classify_contacts(records, _ca_prov_key)
-    us_status.pop('', None);  us_counts.pop('', None)
-    ca_status.pop('', None);  ca_counts.pop('', None)
-
-    # Merge into one lookup keyed by postal code
-    lookup = {}
-    for code, state in {**us_status, **ca_status}.items():
-        counts = us_counts if code in us_status else ca_counts
-        lookup[code] = {'status': state, 'count': counts.get(code, 0)}
-
-    us_conf = sum(1 for c, s in lookup.items() if s['status'] == 'confirmed' and c in us_status)
-    us_work = sum(1 for c, s in lookup.items() if s['status'] == 'worked'    and c in us_status)
-    ca_conf = sum(1 for c, s in lookup.items() if s['status'] == 'confirmed' and c in ca_status)
-    ca_work = sum(1 for c, s in lookup.items() if s['status'] == 'worked'    and c in ca_status)
-    print(f"  States overlay: US {us_conf} confirmed, {us_work} worked | "
-          f"CA {ca_conf} confirmed, {ca_work} worked")
-
-    if not lookup and not geojson.get('features'):
-        print("  States overlay: no US/CA STATE data found — skipping.")
-        return {}
-
-    def style_fn(feature):
-        postal = (feature['properties'].get('postal') or '').upper()
-        info   = lookup.get(postal)
-        cfg    = STATES_COLORS
-        if not info:
-            return {
-                'fillColor':   cfg.get('unworked_fill',   '#ffffff'),
-                'color':       cfg.get('unworked_border', '#666666'),
-                'weight':      cfg.get('unworked_weight', 0.8),
-                'fillOpacity': cfg.get('unworked_opacity', 0.0),
-            }
-        status = info['status']
-        fill   = cfg.get(status, '#888888')
-        border = cfg.get(f'border_{status}', fill)
-        w      = cfg.get(f'{status}_weight', cfg.get('confirmed_weight', 2.0))
-        return {
-            'fillColor':   fill,
-            'color':       border,
-            'weight':      w,
-            'fillOpacity': cfg.get('fill_opacity', 0.45),
-        }
-
-    def tooltip_fn(feature):
-        postal = (feature['properties'].get('postal') or '').upper()
-        name   = feature['properties'].get('name', postal)
-        info   = lookup.get(postal)
-        if info:
-            n   = info['count']
-            tip = (f"{name} ({postal}) — {info['status']} "
-                   f"({n} QSO{'s' if n != 1 else ''})")
-        else:
-            tip = f"{name} ({postal}) — not worked"
-        return folium.Tooltip(tip)
-
-    fg  = folium.FeatureGroup(name='Overlay: States & Provinces', show=True)
-    gjl = folium.GeoJson(
-        geojson,
-        style_function=style_fn,
-        tooltip=folium.GeoJsonTooltip(
-            fields=['postal', 'name'],
-            aliases=['Code', 'Name'],
-            localize=True,
-        ),
-    )
-    gjl.add_to(fg)
-    fg.add_to(m)
-
-    if dynamic:
-        dyn_data, grp_index, band_index = _build_overlay_qso_data(
-            records,
-            lambda r: _us_state_key(r) or _ca_prov_key(r),
-            mode_group_fn,
-        )
-        return {'var_name': gjl.get_name(), 'data': dyn_data,
-                'grp_index': grp_index, 'band_index': band_index}
-    return {}
-
-
-
-# ---------------------------------------------------------------------------
-# County overlay  (reads cached us_counties.geojson)
-# ---------------------------------------------------------------------------
-
-_COUNTIES_CACHE = Path(__file__).parent / "us_counties.geojson"
-
-
-def _cnty_key(r: dict) -> str:
-    """
-    Extract normalised ADIF CNTY key from a QSO record.
-    ADIF stores county as "ST,Name" (e.g. "WA,King").
-    Returns empty string if field is absent or not a US contact.
-    """
-    cnty = r.get('CNTY', '').strip()
-    if not cnty or ',' not in cnty:
-        return ''
-    # Normalise: strip County/Borough/Parish suffix that sometimes creeps in
-    state, name = cnty.split(',', 1)
-    import re as _re
-    name = _re.sub(r'\s+(County|Parish|Borough|Census Area|Municipality)\s*$',
-                   '', name.strip(), flags=_re.IGNORECASE).strip()
-    return f"{state.upper()},{name}"
-
-
-def build_counties_overlay(m, records: list, dynamic: bool = False,
-                           mode_group_fn=None) -> dict:
-    """
-    Add a US county choropleth layer.
-    Reads us_counties.geojson cached by adif_setup.py.
-    When dynamic=True, embeds per-QSO data for JS recompute.
-    faint gray outline = unworked (boundary visible but no fill).
-    """
-    colors = COUNTIES_COLORS
-    import json
-
-    if not _COUNTIES_CACHE.exists():
-        print(
-            "  County overlay: us_counties.geojson not found.\n"
-            "  Run  python adif_setup.py  to download boundary data."
-        )
-        return {}
-
-    try:
-        geojson = json.loads(_COUNTIES_CACHE.read_text(encoding="utf-8"))
-    except Exception as exc:
-        print(f"  County overlay: could not read {_COUNTIES_CACHE.name}: {exc}")
-        return {}
-
-    status, counts = _classify_contacts(records, _cnty_key)
-    status.pop('', None);  counts.pop('', None)
-
-    confirmed_n = sum(1 for s in status.values() if s == 'confirmed')
-    worked_n    = sum(1 for s in status.values() if s == 'worked')
-    print(f"  County overlay: {confirmed_n} confirmed, {worked_n} worked-only counties.")
-
-    # Status-matched border colors (darker shade of each fill)
-    BORDER_COLORS = {'confirmed': '#0d4d28', 'worked': '#7d4e07'}
-
-    def style_fn(feature):
-        key  = feature['properties'].get('adif_key', '')
-        info = status.get(key)
-        if not info:
-            return {
-                'fillColor':   '#ffffff',
-                'color':       '#888888',
-                'weight':      0.5,
-                'fillOpacity': COUNTIES_COLORS.get('unworked_opacity', 0.0),
-            }
-        return {
-            'fillColor':   colors.get(info, '#888888'),
-            'color':       BORDER_COLORS.get(info, '#333333'),
-            'weight':      1.2,
-            'fillOpacity': COUNTIES_COLORS.get('fill_opacity', 0.55),
-        }
-
-    fg  = folium.FeatureGroup(name='Overlay: Counties', show=True)
-    gjl = folium.GeoJson(
-        geojson,
-        style_function=style_fn,
-        tooltip=folium.GeoJsonTooltip(
-            fields=['namelsad', 'state', 'adif_key'],
-            aliases=['County', 'State', 'ADIF key'],
-            localize=True,
-        ),
-    )
-    gjl.add_to(fg)
-    fg.add_to(m)
-
-    if dynamic:
-        dyn_data, grp_index, band_index = _build_overlay_qso_data(
-            records, _cnty_key, mode_group_fn)
-        return {'var_name': gjl.get_name(), 'data': dyn_data,
-                'grp_index': grp_index, 'band_index': band_index}
-    return {}
 
 
 
@@ -1103,35 +532,7 @@ def inject_toggle_panel(m, filtered_records: list, layer_meta: dict) -> None:
     overlay_dyn_js = json.dumps(overlay_dyn)
 
     # Theme colors for JS recompute
-    colors_js = json.dumps({
-        'states': {
-            'confirmed': STATES_COLORS.get('confirmed', '#2ecc71'),
-            'worked':    STATES_COLORS.get('worked',    '#f39c12'),
-            'border_confirmed': STATES_COLORS.get('border_confirmed', '#1a7a45'),
-            'border_worked':    STATES_COLORS.get('border_worked',    '#b8860b'),
-            'confirmed_weight': STATES_COLORS.get('confirmed_weight', 2.0),
-            'worked_weight':    STATES_COLORS.get('worked_weight',    2.0),
-            'fill_opacity':     STATES_COLORS.get('fill_opacity',     0.35),
-            'unworked_fill':    STATES_COLORS.get('unworked_fill',    '#ffffff'),
-            'unworked_border':  STATES_COLORS.get('unworked_border',  '#666666'),
-            'unworked_weight':  STATES_COLORS.get('unworked_weight',  0.8),
-        },
-        'counties': {
-            'confirmed': COUNTIES_COLORS.get('confirmed', '#1a8a4a'),
-            'worked':    COUNTIES_COLORS.get('worked',    '#c0720a'),
-            'border_confirmed': COUNTIES_COLORS.get('border_confirmed', '#0d4d28'),
-            'border_worked':    COUNTIES_COLORS.get('border_worked',    '#7d4e07'),
-            'fill_opacity':     COUNTIES_COLORS.get('fill_opacity',     0.55),
-            'unworked_fill':    COUNTIES_COLORS.get('unworked_fill',    '#ffffff'),
-            'unworked_border':  COUNTIES_COLORS.get('unworked_border',  '#888888'),
-            'unworked_weight':  COUNTIES_COLORS.get('unworked_weight',  0.5),
-        },
-        'grids': {
-            'confirmed':  GRIDS_COLORS.get('confirmed',   '#27ae9e'),
-            'worked':     GRIDS_COLORS.get('worked',      '#e8a020'),
-            'fill_opacity': GRIDS_COLORS.get('fill_opacity', 0.45),
-        },
-    })
+    colors_js = json.dumps(theme_colors_js_dict())
 
     band_colors_js = json.dumps({b: BAND_COLORS.get(b, DEFAULT_COLOR)
                                   for b in bands_present})
@@ -1468,7 +869,13 @@ setTimeout(function() {{
     m.get_root().html.add_child(folium.Element(panel_html))
 
 
-def add_legend(m, band_groups):
+def add_legend(m, band_groups, hidden: bool = False):
+    """
+    Add the band color legend to the map.
+    When hidden=True (e.g. --show-filters is active), the legend is rendered
+    with display:none so it does not appear — the filter panel already shows
+    band swatches and colors.
+    """
     items = ""
     for band in sorted(band_groups.keys()):
         color = BAND_COLORS.get(band, DEFAULT_COLOR)
@@ -1478,8 +885,10 @@ def add_legend(m, band_groups):
             f'border-radius:50%;background:{color};border:1px solid #555"></span>'
             f'<span>{band}</span></div>\n'
         )
+    display = "none" if hidden else "block"
     legend_html = f"""
-    <div style="position:fixed;bottom:30px;left:30px;z-index:9999;
+    <div id="adif-band-legend"
+         style="display:{display};position:fixed;bottom:30px;left:30px;z-index:9999;
                 background:rgba(255,255,255,0.9);padding:10px 14px;
                 border-radius:8px;border:1px solid #aaa;font-size:13px;
                 font-family:sans-serif;box-shadow:2px 2px 6px rgba(0,0,0,0.3)">
@@ -1488,64 +897,6 @@ def add_legend(m, band_groups):
     """
     m.get_root().html.add_child(folium.Element(legend_html))
 
-
-def add_overlay_legend(m, overlays: list) -> None:
-    """
-    Add overlay legend — one row per active overlay type showing its color scheme.
-    Each overlay type uses a distinct color pair so they remain distinguishable
-    when multiple overlays are shown simultaneously.
-    """
-    if not overlays:
-        return
-
-    # (label, confirmed_color, worked_color)
-    OVERLAY_LEGEND_ROWS = {
-        'states':   ('States/Provinces', STATES_COLORS['confirmed'],   STATES_COLORS['worked']),
-        'counties': ('Counties',         COUNTIES_COLORS['confirmed'],  COUNTIES_COLORS['worked']),
-        'grids':    ('Grid Squares',     GRIDS_COLORS['confirmed'],     GRIDS_COLORS['worked']),
-    }
-
-    def swatch(color, border='#555'):
-        return (f'<span style="display:inline-block;width:12px;height:12px;' +
-                f'border-radius:2px;background:{color};border:1px solid {border};' +
-                'opacity:0.85;margin-right:3px"></span>')
-
-    def row(label, c_conf, c_worked):
-        return (
-            f'<div style="display:flex;align-items:center;gap:4px;margin:3px 0">' +
-            swatch(c_conf) + swatch(c_worked) +
-            f'<span style="margin-left:2px">{label}</span></div>'
-        )
-
-    header = (
-        '<div style="display:flex;gap:16px;font-size:11px;color:#666;margin-bottom:4px">' +
-        '<span>' + swatch('#555') + 'Confirmed</span>' +
-        '<span>' + swatch('#aaa') + 'Worked</span>' +
-        '</div>'
-    )
-
-    items = header
-    for key in ['states', 'counties', 'grids']:
-        if key in overlays:
-            label, cc, cw = OVERLAY_LEGEND_ROWS[key]
-            items += row(label, cc, cw)
-
-    items += (
-        '<div style="display:flex;align-items:center;gap:4px;margin:3px 0">' +
-        '<span style="display:inline-block;width:12px;height:12px;border-radius:2px;' +
-        'background:#fff;border:1px solid #999;margin-right:3px"></span>' +
-        '<span>Not worked (outline only)</span></div>'
-    )
-
-    html = f"""
-    <div style="position:fixed;bottom:30px;left:160px;z-index:9999;
-                background:rgba(255,255,255,0.92);padding:10px 14px;
-                border-radius:8px;border:1px solid #aaa;font-size:13px;
-                font-family:sans-serif;box-shadow:2px 2px 6px rgba(0,0,0,0.3)">
-      <b>Overlay</b><br>{items}
-    </div>
-    """
-    m.get_root().html.add_child(folium.Element(html))
 
 
 # ---------------------------------------------------------------------------
@@ -1588,7 +939,7 @@ def main():
     if not adif_path.exists():
         sys.exit(f"File not found: {adif_path}")
 
-    load_theme(args.theme)
+    load_theme(args.theme, script_dir=Path(__file__).parent)
     print(f"Parsing {adif_path.name} ...")
     header, records = parse_adif_with_header(adif_path)
     print(f"  {len(records)} QSO records found.")
@@ -1651,7 +1002,7 @@ def main():
                                        arc_cell_max=args.arc_cell_max)
     # Collect band groups that were actually used (for legend)
     used_bands = {r.get('BAND', 'unknown').lower() for r in filtered if resolve_coords(r)}
-    add_legend(m, {b: None for b in used_bands})
+    add_legend(m, {b: None for b in used_bands}, hidden=args.show_filters)
     # Build mode_group_fn from MODE_GROUPS for dynamic overlay data
     catch_all_lbl = next((g[0] for g in MODE_GROUPS if g[1] is None), "Other")
     def _mgfn(mode: str) -> str:
@@ -1660,25 +1011,55 @@ def main():
                 return lbl
         return catch_all_lbl
 
+    # Tag _confirmed flag onto each record for map_core overlay builders
+    _DXCC_US = '291'
+    _DXCC_CA = '1'
+    for r in filtered:
+        r['_confirmed'] = is_confirmed(r)
+
+    # Key functions for overlay builders
+    def _us_key(r): return r.get('STATE','').upper().strip()[:2] if r.get('DXCC','') == _DXCC_US else ''
+    def _ca_key(r): return r.get('STATE','').upper().strip()[:2] if r.get('DXCC','') == _DXCC_CA else ''
+    def _cnty_key_fn(r):
+        import re as _re
+        cnty = r.get('CNTY','').strip()
+        if not cnty or ',' not in cnty: return ''
+        state, name = cnty.split(',',1)
+        name = _re.sub(r'\s+(County|Parish|Borough|Census Area|Municipality)\s*$','',name.strip(),flags=_re.IGNORECASE).strip()
+        # Normalise to title case — LoTW exports county names in ALL CAPS,
+        # which must match the title-case adif_key values in us_counties.geojson
+        return f"{state.upper()},{name.title()}"
+    def _grid_key(r):
+        g = r.get('GRIDSQUARE','')[:4].upper()
+        return g if len(g)==4 else ''
+    def _grp_fn(r): return _mgfn(r.get('MODE','').upper())
+    def _band_fn(r): return r.get('BAND','unknown').lower()
+
     # Overlays — pass dynamic=True when mode filter panel is active
     overlay_meta = {}   # overlay type -> {var_name, data, grp_index, band_index}
     overlays = [o.strip().lower() for o in (args.overlay or "").split(",") if o.strip()]
     if "states" in overlays:
         print("Building states/provinces overlay ...")
         result = build_states_overlay(m, filtered,
-                                      dynamic=args.show_filters, mode_group_fn=_mgfn)
+                                      us_key_fn=_us_key, ca_key_fn=_ca_key,
+                                      dynamic=args.show_filters,
+                                      group_fn=_grp_fn, band_fn=_band_fn)
         if result:
             overlay_meta['states'] = result
     if "counties" in overlays:
         print("Building county overlay ...")
         result = build_counties_overlay(m, filtered,
-                                        dynamic=args.show_filters, mode_group_fn=_mgfn)
+                                        key_fn=_cnty_key_fn,
+                                        dynamic=args.show_filters,
+                                        group_fn=_grp_fn, band_fn=_band_fn)
         if result:
             overlay_meta['counties'] = result
     if "grids" in overlays:
         print("Building grid square overlay ...")
         result = build_grid_overlay(m, filtered,
-                                    dynamic=args.show_filters, mode_group_fn=_mgfn)
+                                    key_fn=_grid_key,
+                                    dynamic=args.show_filters,
+                                    group_fn=_grp_fn, band_fn=_band_fn)
         if result:
             overlay_meta['grids'] = result
     if overlays:

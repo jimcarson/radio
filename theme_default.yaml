@@ -55,7 +55,7 @@ overlay:
     border_worked:    "#000000"   # black
     confirmed_weight: 2.0         # border stroke width — confirmed states
     worked_weight:    2.0         # border stroke width — worked states
-    fill_opacity:     0.35        # fill opacity for worked/confirmed states (lower = more transparent)
+    fill_opacity:     0.55        # fill opacity for worked/confirmed states
     unworked_fill:    "#ffffff"   # fill for unworked states
     unworked_border:  "#666666"   # border for unworked states
     unworked_weight:  0.8         # border width for unworked states
@@ -65,13 +65,15 @@ overlay:
   counties:
     confirmed:        "#1a8a4a"   # dark forest green fill
     worked:           "#c0720a"   # burnt amber fill
-    border_confirmed: "#0d4d28"   # deep dark green border
-    border_worked:    "#7d4e07"   # deep amber border
-    fill_opacity:     0.55        # fill opacity for worked/confirmed counties
+    border_confirmed: "#000000"   # thin black border — confirmed counties
+    border_worked:    "#000000"   # thin black border — worked counties
+    confirmed_weight: 0.8         # thin border for counties (states are thicker)
+    worked_weight:    0.8         # thin border for counties (states are thicker)
+    fill_opacity:     0.75        # fill opacity — higher so fill is clearly visible
     unworked_fill:    "#ffffff"   # fill for unworked counties
-    unworked_border:  "#888888"   # border for unworked counties
-    unworked_weight:  0.5         # border width for unworked counties
-    unworked_opacity: 0.0         # fill opacity for unworked (0=transparent)
+    unworked_border:  "#000000"   # thin black border even for unworked
+    unworked_weight:  0.3         # very thin line — visible but not distracting
+    unworked_opacity: 0.0         # no fill for unworked (0=transparent)
 
   # Maidenhead grid squares (teal/amber — consistent confirmed=cool, worked=warm)
   grids:
