@@ -62,6 +62,7 @@ Obligatory disclaimer
 
 All scripts must be in the same directory. `qrz_common.py` and `map_core.py` are not run directly — they are imported by the other scripts.
 
+[Texas Counties](texas_counties.jpg "Texas counties confirmed/worked/not")
 ---
 
 ## Requirements
@@ -78,7 +79,7 @@ Python 3.10 or later is recommended. Library versions are intentionally conserva
 
 ## First-time Setup
 
-After cloning, run these steps once to build the boundary and county database files:
+After cloning, you can optionally create your own boundary and county database files:
 
 ```bash
 # 1. Download state/province boundary file
