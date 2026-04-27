@@ -1,27 +1,30 @@
 # Mapping and QRZ Logbook Tools
 
-[European Grids](european_grids.jpg "European Grid Squares")
+Logging QSLs accurately is [surprisingly complicated](https://wt8p.com/logging-amateur-radio-contacts-accurately-is-complicated/). This group of Python programs attempts to address five use cases:
 
-Logging QSLs accurately is [surprisingly complicated](https://wt8p.com/logging-amateur-radio-contacts-accurately-is-complicated/).  This group of python programs attempts to address three use case:
+1. **QRZ discrepancy correction** — QRZ identifies cases where you and the other party logged different values for Grid Square, State, and County. While it provides correction via the browser, *each record* takes 8–13 clicks. The `resolve_qrz_discrepancies.py` script lets you bulk-correct these via the QRZ API.
 
-1. **QRZ discrepancy correction** — QRZ identifies cases where you and the other party logged different values for Grid Square, State, and County.  While it provides correction via the browser, *each record* takes 8–13 clicks.  The resolve_qrz_discrepancies.py lets you bulk do th is via the QRZ API.
+2. **Portable operation cleanup** — When I've worked from a park on the air or other portable site, I've sometimes (ahem) forgotten to set up the data correctly, resulting in logging as my QTH (home). We can use the same method to modify *your* Grid Square, State, and County, as well as any of the other `MY_` fields in the ADIF file. This will allow others to receive credit for your POTA activation, for example.
 
-2. **Portable operation cleanup** — When I've worked from a park on the air or other portable site, I've sometimes (ahem) forgotten to set up the data correctly, resulting it in logging as my QTH (home).   We can use the same method to modify *your* Grid Square, State, and County, as well as any of the other `MY_` fields in the ADIF file. This will allow others to achieve credit for your POTA activation, for example.
+3. **Contact mapping** — Are you a visual person who loves maps? Want something better than the 4cm × 4cm "map" in the QRZ County Award (that does not actually show counties)? Don't want to subject your contacts to spam by signing up for another service? We have you covered. Plot your ADIF file onto a map in your browser. You can optionally add overlays for grids, counties, and states.
 
-3. **Contact mapping** — Are you a visual person who loves maps?  Want something better than 4cm x 4cm "map" in the QRZ County Award (that does not actually show counties)?   Don't want to subject your contacts to spam by signing up for another service?  Well now, we have you covered.  Plot your ADIF file onto a map in your browser.  You can optionally add overlays for grids, counties and states.
+   POTA/SOTA folks — see where you activated with a helpful flag on the map.
 
-POTA/SOTA folks - see where you activated with a helpful flag on the map.
+   ![Mobile activations](TF_Contacts.jpg "POTA Activations")
 
-[Mobile activations](TF_Contacts.jpg "POTA Activations")
-Dealing with logging discrepancies is a lot easier if you can see them on a map.  Plot your log on an interactive browser map, with overlays for worked/confirmed states, counties, and grid squares. Originally written to visualize a two-week Iceland POTA trip.
+   Dealing with logging discrepancies is a lot easier if you can see them on a map. Plot your log on an interactive browser map, with overlays for worked/confirmed states, counties, and grid squares. Originally written to visualize a two-week Iceland POTA trip.
 
+   ![European Grids](european_grids.jpg "European Grid Squares")
 
-4. **Geocache mapping** — I know this is not h am radio, but I swear geocachers have the same obsession with plotting finds, hunting counties, etc.  As much of this is reusable, I added an option to plot a GSAK GPX export on an interactive map, with filters by cache type, difficulty, and terrain. Optionally overlays worked/confirmed counties and states.
+4. **Geocache mapping** — I know this is not ham radio, but geocachers have the same obsession with plotting finds, hunting counties, etc. As much of this code is reusable, I added an option to plot a GSAK GPX export on an interactive map, with filters by cache type, difficulty, and terrain. Optionally overlays worked/confirmed counties and states.
 
-5. **Identify differences between your [QRZ Logbook](https://logbook.qrz.com) and [LoTW (Logbook of the World)](https://lotw.arrl.org).**  - This is still preliminary, but the intent is to help you find counties to fill in QRZ.
+   ![Texas Counties](texas_counties.jpg "Texas counties confirmed/worked/not")
 
-Obligatory disclaimer
+5. **Identify differences between your [QRZ Logbook](https://logbook.qrz.com) and [LoTW (Logbook of the World)](https://lotw.arrl.org)** — This is still preliminary, but the intent is to help you find counties to fill in QRZ.
+
+Obligatory disclaimer:
 > **USE AT YOUR OWN RISK.** These are presented AS IS and without any warranty.
+
 ---
 
 ## Files
@@ -62,7 +65,6 @@ Obligatory disclaimer
 
 All scripts must be in the same directory. `qrz_common.py` and `map_core.py` are not run directly — they are imported by the other scripts.
 
-[Texas Counties](texas_counties.jpg "Texas counties confirmed/worked/not")
 ---
 
 ## Requirements
