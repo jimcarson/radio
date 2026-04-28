@@ -1,0 +1,8 @@
+# GsakName=Attica
+# County & State polygons (c) OpenStreetMap (and) contributors, CC-BY-SA
+
+36.275757	22.914211
+36.276012	22.914217
+36.276020	22.913900
+36.275761	22.913893
+36.275757	22.914211

@@ -1,0 +1,26 @@
+# GsakName=Jersey
+# This Country polygon is based on data © OpenStreetMap contributors
+# The OpenStreetMap data is made available under the Open Database License, see http://www.openstreetmap.org/copyright
+# This polygon file is made available under the same Open Database License: http://opendatacommons.org/licenses/odbl/1.0/.
+# Bounding Box: 49.4605,48.8721667,-1.8333333,-2.5591667
+49.4605,-2.0975
+49.3646667,-1.9925
+49.3166667,-1.8916667
+49.2508333,-1.8333333
+49.1833333,-1.8333333
+49.0658333,-1.8591667
+48.9646667,-1.9428333
+48.9416667,-1.9833333
+48.9365844,-1.9833333
+48.8833333,-1.9833333
+48.8721667,-2.0833333
+48.8721667,-2.2416667
+48.9278333,-2.5253333
+49.0595,-2.5253333
+49.2208333,-2.5591667
+49.2644641,-2.4799491
+49.2959748,-2.3891134
+49.325767,-2.2950459
+49.3624676,-2.2176605
+49.4074579,-2.1335686
+49.4605,-2.0975

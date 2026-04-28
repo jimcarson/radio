@@ -1,0 +1,15 @@
+# GsakName=VIII Región del Biobío
+# This County polygon is based on data © OpenStreetMap contributors
+# The OpenStreetMap data is made available under the Open Database License, see http://www.openstreetmap.org/copyright
+# This polygon file is made available under the same Open Database License: http://opendatacommons.org/licenses/odbl/1.0/.
+
+-38.44606	-73.90381
+-38.44604	-73.90299
+-38.44568	-73.90266
+-38.44545	-73.90220
+-38.44523	-73.90259
+-38.44514	-73.90322
+-38.44522	-73.90446
+-38.44545	-73.90518
+-38.44605	-73.90475
+-38.44606	-73.90381

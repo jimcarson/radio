@@ -1,0 +1,10 @@
+# GsakName=Anguilla
+#
+# This file was created by Peter John Acklam, pjacklam@gmail.com
+#
+18.70,-63.50
+18.70,-62.80
+18.25,-62.80
+18.05,-63.30
+18.05,-63.50
+18.70,-63.50

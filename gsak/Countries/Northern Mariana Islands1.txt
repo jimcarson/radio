@@ -1,0 +1,9 @@
+# GsakName=Northern Mariana Islands
+#
+# This file was created by Peter John Acklam, pjacklam@gmail.com
+#
+20.754,144.677
+20.754,146.274
+13.910,146.274
+13.910,144.677
+20.754,144.677

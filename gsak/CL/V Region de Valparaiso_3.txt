@@ -1,0 +1,13 @@
+# GsakName=V Región de Valparaíso
+# This County polygon is based on data © OpenStreetMap contributors
+# The OpenStreetMap data is made available under the Open Database License, see http://www.openstreetmap.org/copyright
+# This polygon file is made available under the same Open Database License: http://opendatacommons.org/licenses/odbl/1.0/.
+
+-26.863281	-109.179382
+-27.059126	-108.976135
+-27.264396	-108.954163
+-27.449790	-109.443054
+-27.298571	-109.756165
+-26.975933	-109.778137
+-26.804461	-109.481506
+-26.863281	-109.179382

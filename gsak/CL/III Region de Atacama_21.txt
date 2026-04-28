@@ -1,0 +1,21 @@
+# GsakName=III Región de Atacama
+# This County polygon is based on data © OpenStreetMap contributors
+# The OpenStreetMap data is made available under the Open Database License, see http://www.openstreetmap.org/copyright
+# This polygon file is made available under the same Open Database License: http://opendatacommons.org/licenses/odbl/1.0/.
+
+-27.08718	-70.85490
+-27.08671	-70.85423
+-27.08603	-70.85389
+-27.08537	-70.85403
+-27.08507	-70.85439
+-27.08471	-70.85440
+-27.08463	-70.85453
+-27.08482	-70.85468
+-27.08491	-70.85555
+-27.08534	-70.85613
+-27.08551	-70.85621
+-27.08568	-70.85607
+-27.08590	-70.85601
+-27.08603	-70.85533
+-27.08638	-70.85504
+-27.08718	-70.85490

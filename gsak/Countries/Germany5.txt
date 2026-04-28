@@ -1,0 +1,11 @@
+# GsakName=Germany
+# This Country polygon is based on data © OpenStreetMap contributors
+# The OpenStreetMap data is made available under the Open Database License, see http://www.openstreetmap.org/copyright
+# This polygon file is made available under the same Open Database License: http://opendatacommons.org/licenses/odbl/1.0/.
+# Bounding Box: 50.5982266,50.5968229,6.248485,6.2461937
+50.5973695,6.2461937
+50.5972482,6.2465098
+50.5968229,6.24821
+50.5978889,6.248485
+50.5982266,6.2467439
+50.5973695,6.2461937

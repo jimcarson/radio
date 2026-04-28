@@ -1,0 +1,10 @@
+# GsakName=XIV Región de Los Ríos
+# This County polygon is based on data © OpenStreetMap contributors
+# The OpenStreetMap data is made available under the Open Database License, see http://www.openstreetmap.org/copyright
+# This polygon file is made available under the same Open Database License: http://opendatacommons.org/licenses/odbl/1.0/.
+
+-39.86143	-73.43241
+-39.86066	-73.43243
+-39.86042	-73.43410
+-39.86092	-73.43409
+-39.86143	-73.43241

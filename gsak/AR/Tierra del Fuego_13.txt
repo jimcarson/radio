@@ -1,0 +1,35 @@
+# GsakName=Tierra del Fuego
+# This County polygon is based on data © OpenStreetMap contributors
+# The OpenStreetMap data is made available under the Open Database License, see http://www.openstreetmap.org/copyright
+# This polygon file is made available under the same Open Database License: http://opendatacommons.org/licenses/odbl/1.0/.
+
+-54.86179	-68.23735
+-54.86161	-68.23570
+-54.86140	-68.23374
+-54.86103	-68.23244
+-54.86076	-68.23200
+-54.86059	-68.23132
+-54.86010	-68.23174
+-54.85996	-68.23203
+-54.85954	-68.23246
+-54.85918	-68.23248
+-54.85892	-68.23207
+-54.85867	-68.23283
+-54.85849	-68.23419
+-54.85848	-68.23530
+-54.85844	-68.23577
+-54.85811	-68.23618
+-54.85782	-68.23733
+-54.85786	-68.23814
+-54.85795	-68.23875
+-54.85771	-68.24053
+-54.85886	-68.24184
+-54.85886	-68.24273
+-54.85912	-68.24273
+-54.85912	-68.24228
+-54.86015	-68.24271
+-54.86014	-68.24182
+-54.86078	-68.24136
+-54.86090	-68.24047
+-54.86142	-68.24046
+-54.86179	-68.23735

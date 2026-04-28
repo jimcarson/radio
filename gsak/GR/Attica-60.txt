@@ -1,0 +1,8 @@
+# GsakName=Attica
+# County & State polygons (c) OpenStreetMap (and) contributors, CC-BY-SA
+
+36.141312	22.998037
+36.141567	22.998045
+36.141575	22.997728
+36.141319	22.997723
+36.141312	22.998037

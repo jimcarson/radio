@@ -1,0 +1,25 @@
+# GsakName=I Región de Tarapacá
+# This County polygon is based on data © OpenStreetMap contributors
+# The OpenStreetMap data is made available under the Open Database License, see http://www.openstreetmap.org/copyright
+# This polygon file is made available under the same Open Database License: http://opendatacommons.org/licenses/odbl/1.0/.
+
+-19.58081	-70.20537
+-19.58060	-70.20558
+-19.58055	-70.20573
+-19.58052	-70.20589
+-19.58058	-70.20602
+-19.58060	-70.20617
+-19.58059	-70.20623
+-19.58066	-70.20635
+-19.58075	-70.20632
+-19.58083	-70.20626
+-19.58089	-70.20619
+-19.58094	-70.20609
+-19.58095	-70.20602
+-19.58091	-70.20596
+-19.58094	-70.20593
+-19.58095	-70.20581
+-19.58097	-70.20577
+-19.58093	-70.20561
+-19.58087	-70.20547
+-19.58081	-70.20537

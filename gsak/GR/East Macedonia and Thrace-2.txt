@@ -1,0 +1,11 @@
+# GsakName=East Macedonia and Thrace
+# County & State polygons (c) OpenStreetMap (and) contributors, CC-BY-SA
+
+40.583714,25.481415
+40.508579,25.731354
+40.392581,25.727234
+40.344451,25.526733
+40.443812,25.341339
+40.522151,25.404510
+40.583714,25.481415
+

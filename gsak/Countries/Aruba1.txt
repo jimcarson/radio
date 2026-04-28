@@ -1,0 +1,30 @@
+# GsakName=Aruba
+#
+# This polygon file contains the exclusive economic zone around Aruba.
+#
+# This file was created by Peter John Acklam, pjacklam@gmail.com
+#
+# The source data was obtained from the Maritime Boundaries Geodatabase,
+# which requests that the following citation is used for the data:
+#
+# VLIZ (2014). Maritime Boundaries Geodatabase, version 8. Available
+# online at http://www.marineregions.org/. Consulted on 2015-01-19.
+#
+12.148508,-69.548028
+12.311847,-69.519139
+12.580742,-69.504142
+12.607417,-69.500314
+12.612164,-69.499631
+12.6388,-69.495808
+12.962142,-69.454142
+13.306597,-69.388308
+13.496881,-69.340808
+15.349717,-69.340822
+15.4133333,-69.5772222
+12.8166666,-70.4166667
+12.3500004,-70.4166667
+12.35,-70.4166667
+12.35,-70.1641666
+12.365,-70.1402778
+12.2627778,-69.7391667
+12.148508,-69.548028

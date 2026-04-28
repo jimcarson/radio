@@ -1,0 +1,15 @@
+# GsakName=II Región de Antofagasta
+# This County polygon is based on data © OpenStreetMap contributors
+# The OpenStreetMap data is made available under the Open Database License, see http://www.openstreetmap.org/copyright
+# This polygon file is made available under the same Open Database License: http://opendatacommons.org/licenses/odbl/1.0/.
+
+-25.68291	-70.69290
+-25.68308	-70.69287
+-25.68310	-70.69271
+-25.68285	-70.69255
+-25.68253	-70.69259
+-25.68224	-70.69259
+-25.68231	-70.69272
+-25.68255	-70.69281
+-25.68282	-70.69287
+-25.68291	-70.69290

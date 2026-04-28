@@ -1,0 +1,9 @@
+# GsakName=Guam
+#
+# This file was created by Peter John Acklam, pjacklam@gmail.com
+#
+13.855,144.413
+13.855,145.162
+13.033,145.162
+13.033,144.413
+13.855,144.413

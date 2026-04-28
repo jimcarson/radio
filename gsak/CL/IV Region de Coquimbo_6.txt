@@ -1,0 +1,27 @@
+# GsakName=IV Región de Coquimbo
+# This County polygon is based on data © OpenStreetMap contributors
+# The OpenStreetMap data is made available under the Open Database License, see http://www.openstreetmap.org/copyright
+# This polygon file is made available under the same Open Database License: http://opendatacommons.org/licenses/odbl/1.0/.
+
+-29.59182	-71.53772
+-29.59133	-71.53712
+-29.59122	-71.53535
+-29.58893	-71.53397
+-29.58663	-71.53362
+-29.58510	-71.53255
+-29.58512	-71.53196
+-29.58255	-71.53161
+-29.58254	-71.53219
+-29.58151	-71.53217
+-29.58152	-71.53187
+-29.58022	-71.53243
+-29.58094	-71.53510
+-29.58298	-71.53632
+-29.58322	-71.53721
+-29.58398	-71.53752
+-29.58472	-71.53932
+-29.58702	-71.53995
+-29.58700	-71.54084
+-29.58880	-71.54073
+-29.59166	-71.53919
+-29.59182	-71.53772

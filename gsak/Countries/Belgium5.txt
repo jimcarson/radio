@@ -1,0 +1,16 @@
+# GsakName=Belgium
+# This Country polygon is based on data © OpenStreetMap contributors
+# The OpenStreetMap data is made available under the Open Database License, see http://www.openstreetmap.org/copyright
+# This polygon file is made available under the same Open Database License: http://opendatacommons.org/licenses/odbl/1.0/.
+# Bounding Box: 51.4487899,51.4480468,4.8366643,4.8357449
+51.4484594,4.8357449
+51.4485329,4.8358425
+51.4486748,4.836045
+51.4487707,4.8361817
+51.4487899,4.8362091
+51.4485974,4.8364331
+51.4483988,4.8366643
+51.4483794,4.836637
+51.4483118,4.8365419
+51.4480468,4.836225
+51.4484594,4.8357449

@@ -1,0 +1,10 @@
+# GsakName=Spain
+# This Country polygon is based on data © OpenStreetMap contributors
+# The OpenStreetMap data is made available under the Open Database License, see http://www.openstreetmap.org/copyright
+# This polygon file is made available under the same Open Database License: http://opendatacommons.org/licenses/odbl/1.0/.
+# Bounding Box: 35.2016224,35.1711501,-2.4027374,-2.4600895
+35.2016224,-2.4600895
+35.1713326,-2.4500387
+35.1711501,-2.4132603
+35.201412,-2.4027374
+35.2016224,-2.4600895

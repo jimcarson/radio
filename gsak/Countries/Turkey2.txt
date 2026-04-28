@@ -1,0 +1,17 @@
+# GsakName=Turkey
+# This Country polygon is based on data © OpenStreetMap contributors
+# The OpenStreetMap data is made available under the Open Database License, see http://www.openstreetmap.org/copyright
+# This polygon file is made available under the same Open Database License: http://opendatacommons.org/licenses/odbl/1.0/.
+# Bounding Box: 36.6397998,36.6377812,38.20839,38.206829
+36.6397998,38.2074183
+36.6396108,38.20839
+36.6387614,38.2079242
+36.6380266,38.2078635
+36.6378159,38.2076336
+36.6377812,38.20715
+36.6379147,38.2068818
+36.6380311,38.206829
+36.6385087,38.2069945
+36.6388059,38.2072206
+36.6390168,38.2072635
+36.6397998,38.2074183

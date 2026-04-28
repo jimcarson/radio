@@ -1,0 +1,8 @@
+# GsakName=Attica
+# County & State polygons (c) OpenStreetMap (and) contributors, CC-BY-SA
+
+37.336056	23.426573
+37.335869	23.426208
+37.335544	23.426102
+37.335903	23.426767
+37.336056	23.426573

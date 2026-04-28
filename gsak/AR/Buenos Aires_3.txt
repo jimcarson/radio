@@ -1,0 +1,18 @@
+# GsakName=Buenos Aires
+# This County polygon is based on data © OpenStreetMap contributors
+# The OpenStreetMap data is made available under the Open Database License, see http://www.openstreetmap.org/copyright
+# This polygon file is made available under the same Open Database License: http://opendatacommons.org/licenses/odbl/1.0/.
+
+-35.84501	-57.38558
+-35.84497	-57.38522
+-35.84492	-57.38475
+-35.84515	-57.38465
+-35.84535	-57.38479
+-35.84539	-57.38501
+-35.84552	-57.38517
+-35.84571	-57.38527
+-35.84562	-57.38545
+-35.84546	-57.38562
+-35.84523	-57.38584
+-35.84509	-57.38572
+-35.84501	-57.38558

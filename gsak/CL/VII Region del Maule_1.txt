@@ -1,0 +1,15 @@
+# GsakName=VII Región del Maule
+# This County polygon is based on data © OpenStreetMap contributors
+# The OpenStreetMap data is made available under the Open Database License, see http://www.openstreetmap.org/copyright
+# This polygon file is made available under the same Open Database License: http://opendatacommons.org/licenses/odbl/1.0/.
+
+-35.97845	-72.78636
+-35.97851	-72.78638
+-35.97860	-72.78634
+-35.97866	-72.78626
+-35.97865	-72.78618
+-35.97858	-72.78611
+-35.97848	-72.78616
+-35.97845	-72.78620
+-35.97840	-72.78630
+-35.97845	-72.78636

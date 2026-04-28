@@ -1,0 +1,9 @@
+# GsakName=American Samoa
+#
+# This file was created by Peter John Acklam, pjacklam@gmail.com
+#
+-14.029,-171.053
+-14.029,-170.340
+-14.575,-170.340
+-14.575,-171.053
+-14.029,-171.053

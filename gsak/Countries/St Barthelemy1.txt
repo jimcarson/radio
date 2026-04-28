@@ -1,0 +1,9 @@
+# GsakName=St Barthelemy
+#
+# This file was created by Peter John Acklam, pjacklam@gmail.com
+#
+18.00,-63.00
+18.00,-62.65
+17.75,-62.65
+17.75,-63.00
+18.00,-63.00

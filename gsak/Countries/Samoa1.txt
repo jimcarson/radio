@@ -1,0 +1,9 @@
+# GsakName=Samoa
+#
+# This file was created by Peter John Acklam, pjacklam@gmail.com
+#
+-13.238,-173.010
+-13.238,-171.193
+-14.277,-171.193
+-14.277,-173.010
+-13.238,-173.010
