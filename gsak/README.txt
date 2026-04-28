@@ -30,6 +30,11 @@ Directory structure
       QC/
         Montreal.txt
         ...
+    AR, AU, CL, CZ, DE, ES, FO, FR, GR, HU, ID, IE, IS, IT, NL, NO, NZ, UK -
+        regions within Argentina, Australia, Chile, Czechia, Germany, Spain, 
+        Faroe Islands, France, Greece, Hungary, Indonesia, Ireland, Iceland,
+        Italy, Netherlands, Norway, New Zealand and the United Kingdom
+    Countries - polygons from GSAK
 
 Filename conventions (US)
 -------------------------
