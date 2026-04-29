@@ -7,3 +7,10 @@ old
 wt8p.*
 tofix.csv
 .gitignore
+samples
+gpx_extract.csv
+gpx_extract.gpx
+adif_extract.csv
+gsak_counties.db*
+*.png
+liberty.csv reco.*
