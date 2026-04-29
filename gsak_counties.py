@@ -23,16 +23,27 @@ County polygon data credit:
     Each file contains one lat/lon pair per line (whitespace- or
     comma-separated), forming a closed polygon.
 
-Usage — build the database once:
-    python gsak_counties.py build --gsak-dir "C:/GSAK/Data/Counties" --db gsak_counties.db
+Usage — build the database (run once per country, all share the same DB):
+    python gsak_counties.py build --gsak-dir "C:/GSAK/Data/Counties" --db gsak_counties.db --country usa
+    python gsak_counties.py build --gsak-dir "C:/GSAK/Data/Counties" --db gsak_counties.db --country ca
+    python gsak_counties.py build --gsak-dir "C:/GSAK/Data/Counties" --db gsak_counties.db --country cz
+    python gsak_counties.py build --gsak-dir "C:/GSAK/Data/Counties" --db gsak_counties.db --country is
+
+Two directory layouts are supported and auto-detected:
+    Hierarchical (US, CA): gsak_dir/US/WA/King.txt  — state_code = postal code
+    Flat (all others):     gsak_dir/CZ/Decin.txt    — state_code = country code
 
 Usage — lookup from another script:
     from gsak_counties import lookup_county
     state, county = lookup_county(47.56, -122.03, db_path="gsak_counties.db")
-    # Returns e.g. ('WA', 'King') or (None, None) if not found / DB absent
+    # US:  ('WA', 'King')
+    # CZ:  ('CZ', 'Hlavni mesto Praha')
+    # IS:  ('IS', 'Hofudborgarsvaedi')
+    # Returns (None, None) if not found or DB absent
 
 CLI lookup (for testing):
     python gsak_counties.py lookup 47.56 -122.03 --db gsak_counties.db
+    python gsak_counties.py stats  --db gsak_counties.db
 
 Dependencies: stdlib only (sqlite3, json, pathlib, argparse)
 """
@@ -199,17 +210,44 @@ def stem_to_county_name_ca(stem: str) -> str:
     """
     return stem.replace('_', ' ').strip()
 
-def _parse_polygon(path: Path) -> list[tuple[float, float]]:
+def _read_polygon_text(path: Path) -> str:
     """
-    Parse a GSAK county .txt file into a list of (lat, lon) tuples.
-    Handles two separator styles found in the wild:
-      - Whitespace-separated: "51.2707  -106.8707"  (US and most CA files)
-      - Comma-separated:      "51.2707,-106.8707"   (Saskatchewan files)
+    Read a GSAK polygon file, trying UTF-8 first then cp1252.
+    cp1252 (Windows Western European) is common for files exported from
+    GSAK on Windows, particularly those with accented region names in
+    the #gsakname= header line.
     """
-    pts = []
-    for line in path.read_text(encoding='utf-8', errors='replace').splitlines():
+    try:
+        return path.read_text(encoding='utf-8')
+    except UnicodeDecodeError:
+        return path.read_text(encoding='cp1252', errors='replace')
+
+
+def _parse_polygon(path: Path) -> tuple[list[tuple[float, float]], str | None]:
+    """
+    Parse a GSAK polygon .txt file into (points, gsakname).
+
+    points   : list of (lat, lon) tuples forming the polygon
+    gsakname : value of the '#gsakname=' header line if present, else None
+
+    Handles:
+      - Blank lines (skipped)
+      - Comment / header lines starting with '#' (parsed for #gsakname=)
+      - Whitespace-separated coords: "51.2707  -106.8707"  (US, most CA)
+      - Comma-separated coords:      "51.2707,-106.8707"   (Saskatchewan, IS)
+      - UTF-8 and cp1252 encodings
+    """
+    pts: list[tuple[float, float]] = []
+    gsakname: str | None = None
+
+    for line in _read_polygon_text(path).splitlines():
         line = line.strip()
         if not line:
+            continue
+        # Header / comment lines
+        if line.startswith('#'):
+            if line.lower().startswith('#gsakname='):
+                gsakname = line[len('#gsakname='):].strip()
             continue
         # Try comma separator first, then whitespace
         parts = line.split(',') if ',' in line else line.split()
@@ -220,7 +258,8 @@ def _parse_polygon(path: Path) -> list[tuple[float, float]]:
             pts.append((lat, lon))
         except ValueError:
             continue
-    return pts
+
+    return pts, gsakname
 
 
 def _bbox(pts: list[tuple[float, float]]) -> tuple[float, float, float, float]:
@@ -289,19 +328,66 @@ def _open_db(db_path: Path) -> sqlite3.Connection:
 # Build database
 # ---------------------------------------------------------------------------
 
+# Country code -> display name for flat (non US/CA) countries.
+# Extend as you add more countries to the DB.
+_COUNTRY_NAMES: dict[str, str] = {
+    'AR': 'Argentina',
+    'AU': 'Australia',
+    'CZ': 'Czechia',
+    'IS': 'Iceland',
+    'IT': 'Italy',
+    'NO': 'Norway',
+    'NZ': 'New Zealand',
+    'UK': 'United Kingdom',
+}
+
+# Two-letter codes that use the two-level US/CA hierarchy.
+# Everything else is treated as flat (regions directly in country dir).
+_HIERARCHICAL_COUNTRIES = {'us', 'usa', 'ca', 'canada'}
+
+
+def _country_code_from_dir(country: str) -> str:
+    """
+    Normalise a country argument to an uppercase 2-letter code.
+    Accepts 'usa'->'US', 'ca'->'CA', 'cz'->'CZ', etc.
+    'usa' and 'canada' are special-cased to their ISO codes.
+    """
+    low = country.lower()
+    if low in ('usa', 'us'):
+        return 'US'
+    if low in ('ca', 'canada'):
+        return 'CA'
+    return country.upper()[:2]
+
+
 def build_db(gsak_dir: Path, db_path: Path,
              country: str = 'usa', verbose: bool = False) -> int:
     """
-    Walk gsak_dir/{country}/{State}/{County}.txt and build SQLite DB.
+    Build (or update) the SQLite region DB from GSAK polygon files.
 
-    Returns the number of counties inserted.
+    Two directory layouts are supported, detected automatically:
+
+    Hierarchical (US and CA):
+        gsak_dir/US/WA/King.txt
+        gsak_dir/CA/Ontario/Toronto.txt
+        state_code = province/state postal code ('WA', 'ON', ...)
+
+    Flat (all other countries — CZ, IS, AU, UK, NO, ...):
+        gsak_dir/CZ/Decin.txt
+        gsak_dir/IS/Hofudborgarsvaedi.txt
+        state_code = 2-letter country code ('CZ', 'IS', ...)
+        county_name = region name derived from filename stem
+                      (or #gsakname= header for single-char/digit stems)
+
+    Run once per country; multiple countries can share the same DB.
+    Returns the number of regions inserted.
     """
     gsak_dir = Path(gsak_dir)
     db_path  = Path(db_path)
     country_dir = gsak_dir / country
 
     if not country_dir.exists():
-        # Try case-insensitive search
+        # Case-insensitive search
         for d in gsak_dir.iterdir():
             if d.name.lower() == country.lower():
                 country_dir = d
@@ -313,94 +399,153 @@ def build_db(gsak_dir: Path, db_path: Path,
     conn = _open_db(db_path)
     conn.executescript(_SCHEMA)
 
-    # Determine which state codes belong to this country so we can
-    # clear only those rows when rebuilding (avoids wiping US when rebuilding CA)
+    is_hierarchical = country.lower() in _HIERARCHICAL_COUNTRIES
     is_canada = country.lower() in ('ca', 'canada')
-    _CA_CODES = {'AB','BC','MB','NB','NL','NS','NU','ON','PE','QC','SK','YT','NT'}
-    _US_CODES = set(_STATE_POSTAL.values()) - _CA_CODES
-    country_codes = _CA_CODES if is_canada else _US_CODES
-    placeholders = ','.join('?' * len(country_codes))
-    conn.execute(
-        f"DELETE FROM counties WHERE state_code IN ({placeholders})",
-        list(country_codes)
-    )
-    conn.commit()
-    inserted = 0
-    skipped  = 0
-    state_dirs = sorted(d for d in country_dir.iterdir() if d.is_dir())
+    country_code = _country_code_from_dir(country)
 
-    for state_dir in state_dirs:
-        state_name = state_dir.name
-
-        # Support two directory structures:
-        #   Full name:   gsak/US/Washington/King.txt   (state_name = 'Washington')
-        #   Postal code: gsak/US/WA/King.txt           (state_name = 'WA')
-        # If the directory name is already a 2-letter postal code, use it directly.
-        if len(state_name) == 2 and state_name.upper() in _POSTAL_STATE:
-            state_code = state_name.upper()
-        elif len(state_name) == 2 and state_name.upper() in set(_STATE_POSTAL.values()):
-            state_code = state_name.upper()
-        else:
-            state_code = _dir_to_postal(state_name)
-
-        if state_code is None:
-            if verbose:
-                print(f"  Warning: no postal code for '{state_name}' — skipped.")
-            skipped += 1
-            continue
-
-        # Canadian files use spaces in names; US files use underscores
-        txt_files = sorted(state_dir.glob('*.txt'))
-        # Skip version.ver (GSAK metadata)
-        txt_files = [t for t in txt_files
-                     if t.stem.lower() != 'version'
-                     and not t.stem.lower().startswith('version')]
-
-        if not txt_files:
-            if verbose:
-                print(f"  {state_code} ({state_name}): no polygon files — skipped.")
-            continue
-
-        if verbose:
-            print(f"  {state_code} ({state_name}): {len(txt_files)} regions")
-
-        rows = []
-        for txt in txt_files:
-            # Name derivation differs by country
-            if is_canada:
-                county_name = stem_to_county_name_ca(txt.stem)
-            else:
-                county_name = stem_to_county_name(txt.stem, state_code)
-
-            pts = _parse_polygon(txt)
-            if len(pts) < 3:
-                if verbose:
-                    print(f"    Warning: {txt.name} has < 3 points — skipped.")
-                continue
-            min_lat, max_lat, min_lon, max_lon = _bbox(pts)
-            adif_key = f"{state_code},{county_name}"
-            polygon_json = json.dumps(pts)
-            rows.append((
-                state_code, state_name, county_name, adif_key,
-                min_lat, max_lat, min_lon, max_lon, polygon_json,
-            ))
-
-        conn.executemany(
-            "INSERT INTO counties "
-            "(state_code, state_name, county_name, adif_key, "
-            " min_lat, max_lat, min_lon, max_lon, polygon) "
-            "VALUES (?,?,?,?,?,?,?,?,?)",
-            rows,
+    # -----------------------------------------------------------------------
+    # Hierarchical layout (US / CA): iterate state subdirectories
+    # -----------------------------------------------------------------------
+    if is_hierarchical:
+        _CA_CODES = {'AB','BC','MB','NB','NL','NS','NU','ON','PE','QC','SK','YT','NT'}
+        _US_CODES = set(_STATE_POSTAL.values()) - _CA_CODES
+        country_codes = _CA_CODES if is_canada else _US_CODES
+        placeholders = ','.join('?' * len(country_codes))
+        conn.execute(
+            f"DELETE FROM counties WHERE state_code IN ({placeholders})",
+            list(country_codes)
         )
         conn.commit()
-        inserted += len(rows)
 
+        inserted = 0
+        skipped  = 0
+        state_dirs = sorted(d for d in country_dir.iterdir() if d.is_dir())
+
+        for state_dir in state_dirs:
+            state_name = state_dir.name
+
+            if len(state_name) == 2 and state_name.upper() in _POSTAL_STATE:
+                state_code = state_name.upper()
+            elif len(state_name) == 2 and state_name.upper() in set(_STATE_POSTAL.values()):
+                state_code = state_name.upper()
+            else:
+                state_code = _dir_to_postal(state_name)
+
+            if state_code is None:
+                if verbose:
+                    print(f"  Warning: no postal code for '{state_name}' — skipped.")
+                skipped += 1
+                continue
+
+            txt_files = sorted(state_dir.glob('*.txt'))
+            txt_files = [t for t in txt_files
+                         if t.stem.lower() != 'version'
+                         and not t.stem.lower().startswith('version')]
+
+            if not txt_files:
+                if verbose:
+                    print(f"  {state_code} ({state_name}): no polygon files — skipped.")
+                continue
+
+            if verbose:
+                print(f"  {state_code} ({state_name}): {len(txt_files)} regions")
+
+            rows = []
+            for txt in txt_files:
+                if is_canada:
+                    county_name = stem_to_county_name_ca(txt.stem)
+                else:
+                    county_name = stem_to_county_name(txt.stem, state_code)
+
+                pts, _ = _parse_polygon(txt)
+                if len(pts) < 3:
+                    if verbose:
+                        print(f"    Warning: {txt.name} has < 3 points — skipped.")
+                    continue
+                min_lat, max_lat, min_lon, max_lon = _bbox(pts)
+                adif_key = f"{state_code},{county_name}"
+                rows.append((
+                    state_code, state_name, county_name, adif_key,
+                    min_lat, max_lat, min_lon, max_lon, json.dumps(pts),
+                ))
+
+            conn.executemany(
+                "INSERT INTO counties "
+                "(state_code, state_name, county_name, adif_key, "
+                " min_lat, max_lat, min_lon, max_lon, polygon) "
+                "VALUES (?,?,?,?,?,?,?,?,?)",
+                rows,
+            )
+            conn.commit()
+            inserted += len(rows)
+
+        conn.close()
+        print(f"  DB built: {inserted} regions from {len(state_dirs)} "
+              f"{'province' if is_canada else 'state'} directories.")
+        if skipped:
+            print(f"  {skipped} director(y/ies) skipped — no postal code mapping.")
+        return inserted
+
+    # -----------------------------------------------------------------------
+    # Flat layout (CZ, IS, AU, UK, NO, ...): .txt files directly in country dir
+    # -----------------------------------------------------------------------
+    country_name = _COUNTRY_NAMES.get(country_code, country_code)
+
+    # Delete existing rows for this country code before rebuilding
+    conn.execute("DELETE FROM counties WHERE state_code = ?", (country_code,))
+    conn.commit()
+
+    txt_files = sorted(
+        t for t in country_dir.glob('*.txt')
+        if t.stem.lower() not in ('version',) and not t.stem.lower().startswith('version')
+    )
+
+    if not txt_files:
+        conn.close()
+        print(f"  No polygon files found in {country_dir}")
+        return 0
+
+    if verbose:
+        print(f"  {country_code} ({country_name}): {len(txt_files)} region files")
+
+    rows = []
+    for txt in txt_files:
+        pts, gsakname = _parse_polygon(txt)
+
+        # Derive region name: prefer #gsakname= header for trivially short
+        # stems (single char or pure digits — e.g. 'h' for Hofudborgarsvaedi).
+        # Otherwise use the stem with underscores→spaces.
+        stem = txt.stem
+        if gsakname and (len(stem) <= 1 or stem.isdigit()):
+            county_name = gsakname
+        else:
+            county_name = stem.replace('_', ' ').strip()
+
+        if len(pts) < 3:
+            if verbose:
+                print(f"  Warning: {txt.name} ({county_name}) has < 3 points — skipped.")
+            continue
+
+        min_lat, max_lat, min_lon, max_lon = _bbox(pts)
+        adif_key = f"{country_code},{county_name}"
+        rows.append((
+            country_code, country_name, county_name, adif_key,
+            min_lat, max_lat, min_lon, max_lon, json.dumps(pts),
+        ))
+        if verbose:
+            print(f"    {county_name}: {len(pts)} points")
+
+    conn.executemany(
+        "INSERT INTO counties "
+        "(state_code, state_name, county_name, adif_key, "
+        " min_lat, max_lat, min_lon, max_lon, polygon) "
+        "VALUES (?,?,?,?,?,?,?,?,?)",
+        rows,
+    )
+    conn.commit()
     conn.close()
-    print(f"  DB built: {inserted} regions from {len(state_dirs)} "
-          f"{'province' if is_canada else 'state'} directories.")
-    if skipped:
-        print(f"  {skipped} director(y/ies) skipped — no postal code mapping.")
-    return inserted
+    print(f"  DB built: {len(rows)} regions for {country_code} ({country_name})")
+    return len(rows)
 
 
 # ---------------------------------------------------------------------------
@@ -516,16 +661,17 @@ def _cmd_stats(args):
         return
     conn = sqlite3.connect(str(db_path))
     rows = conn.execute(
-        "SELECT state_code, COUNT(*) as n FROM counties "
+        "SELECT state_code, state_name, COUNT(*) as n FROM counties "
         "GROUP BY state_code ORDER BY state_code"
     ).fetchall()
-    total = sum(r[1] for r in rows)
-    print(f"{'State':6} {'Counties':>8}")
-    print('-' * 16)
+    total = sum(r[2] for r in rows)
+    print(f"{'Code':<6} {'Regions':>7}  Name")
+    print('-' * 36)
     for r in rows:
-        print(f"  {r[0]:4}   {r[1]:>6}")
-    print('-' * 16)
-    print(f"  {'TOTAL':4}   {total:>6}")
+        code, name, n = r[0], r[1], r[2]
+        print(f"  {code:<4}   {n:>6}  {name}")
+    print('-' * 36)
+    print(f"  {'TOTAL':<4}   {total:>6}")
     conn.close()
 
 
@@ -545,8 +691,8 @@ def main():
     p_build.add_argument('--db', default='gsak_counties.db',
                          help='Output DB path (default: gsak_counties.db)')
     p_build.add_argument('--country', default='usa',
-                         help='Country subdirectory to load: usa or ca (default: usa). '
-                              'Run twice to load both into the same DB.')
+                         help='Country subdirectory to load, e.g.: usa, ca, cz, is, au, uk, no. '
+                              '(default: usa). Run once per country to load multiple into the same DB.')
     p_build.add_argument('--verbose', action='store_true')
     p_build.set_defaults(func=_cmd_build)
 
