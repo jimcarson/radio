@@ -14,3 +14,6 @@ adif_extract.csv
 gsak_counties.db*
 *.png
 liberty.csv reco.*
+temp
+us_counties_light.geojson
+.gitignore
