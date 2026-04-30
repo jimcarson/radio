@@ -48,100 +48,18 @@ CLI lookup (for testing):
 Dependencies: stdlib only (sqlite3, json, pathlib, argparse)
 """
 
-__version__ = "1.5.0"  # fix CA county name underscore→space conversion
+__version__ = "1.6.0"  # country_polygons table, build-countries/list-countries subcommands, lookup_country()
 
 import argparse
 import json
 import sqlite3
 import sys
 from pathlib import Path
-
-
-# ---------------------------------------------------------------------------
-# State name → 2-letter postal code
-# ---------------------------------------------------------------------------
-
-_STATE_POSTAL: dict[str, str] = {
-    # US states — standard spaced names
-    'Alabama': 'AL', 'Alaska': 'AK', 'Arizona': 'AZ', 'Arkansas': 'AR',
-    'California': 'CA', 'Colorado': 'CO', 'Connecticut': 'CT',
-    'Delaware': 'DE', 'Florida': 'FL', 'Georgia': 'GA', 'Hawaii': 'HI',
-    'Idaho': 'ID', 'Illinois': 'IL', 'Indiana': 'IN', 'Iowa': 'IA',
-    'Kansas': 'KS', 'Kentucky': 'KY', 'Louisiana': 'LA', 'Maine': 'ME',
-    'Maryland': 'MD', 'Massachusetts': 'MA', 'Michigan': 'MI',
-    'Minnesota': 'MN', 'Mississippi': 'MS', 'Missouri': 'MO',
-    'Montana': 'MT', 'Nebraska': 'NE', 'Nevada': 'NV',
-    'New Hampshire': 'NH', 'New Jersey': 'NJ', 'New Mexico': 'NM',
-    'New York': 'NY', 'North Carolina': 'NC', 'North Dakota': 'ND',
-    'Ohio': 'OH', 'Oklahoma': 'OK', 'Oregon': 'OR', 'Pennsylvania': 'PA',
-    'Rhode Island': 'RI', 'South Carolina': 'SC', 'South Dakota': 'SD',
-    'Tennessee': 'TN', 'Texas': 'TX', 'Utah': 'UT', 'Vermont': 'VT',
-    'Virginia': 'VA', 'Washington': 'WA', 'West Virginia': 'WV',
-    'Wisconsin': 'WI', 'Wyoming': 'WY',
-    'District of Columbia': 'DC',
-    # US — GSAK run-together directory names (no spaces or separators)
-    'NewHampshire': 'NH', 'NewJersey': 'NJ', 'NewMexico': 'NM',
-    'NewYork': 'NY', 'NorthCarolina': 'NC', 'NorthDakota': 'ND',
-    'RhodeIsland': 'RI', 'SouthCarolina': 'SC', 'SouthDakota': 'SD',
-    'WestVirginia': 'WV', 'DistrictofColumbia': 'DC',
-    # Canadian provinces and territories — directory names use spaces
-    'Alberta': 'AB', 'British Columbia': 'BC', 'Manitoba': 'MB',
-    'New Brunswick': 'NB', 'Newfoundland and Labrador': 'NL',
-    'Nova Scotia': 'NS', 'Nunavut': 'NU', 'Ontario': 'ON',
-    'Prince Edward Island': 'PE', 'Saskatchewan': 'SK',
-    'Yukon': 'YT', 'Northwest Territories': 'NT',
-    # Quebec — accented (canonical), unaccented (filesystem variant)
-    'Québec': 'QC', 'Quebec': 'QC',
-    # Canadian province dirs after gsak_rename.py (spaces → underscores)
-    'British_Columbia': 'BC', 'New_Brunswick': 'NB',
-    'Newfoundland_and_Labrador': 'NL', 'Nova_Scotia': 'NS',
-    'Prince_Edward_Island': 'PE', 'Northwest_Territories': 'NT',
-}
-
-def _dir_to_postal(dir_name: str) -> str | None:
-    """
-    Resolve a GSAK state/province directory name to a 2-letter postal code.
-    Handles accented characters by also trying a Unicode-normalised fallback.
-    """
-    code = _STATE_POSTAL.get(dir_name)
-    if code:
-        return code
-    # Strip accents and retry (catches Québec → Quebec on some filesystems)
-    import unicodedata
-    stripped = ''.join(
-        c for c in unicodedata.normalize('NFD', dir_name)
-        if unicodedata.category(c) != 'Mn'
-    )
-    return _STATE_POSTAL.get(stripped)
-
-# Reverse map: postal → full name (for display)
-_POSTAL_STATE: dict[str, str] = {v: k for k, v in _STATE_POSTAL.items()}
-
+from location_mapping import GSAK_NAME_TO_ISO, ISO_TO_GSAK_NAME, _POSTAL_STATE, _STATE_POSTAL, _dir_to_postal, CA_CODES, _VA_CITY_STEMS
 
 # ---------------------------------------------------------------------------
 # Polygon parsing
 # ---------------------------------------------------------------------------
-
-
-# Virginia independent cities that end in "City" in their GSAK stem.
-# These get the " City" suffix stripped for the ADIF key (e.g. "VA,Alexandria").
-# Genuine counties whose name contains "City" (Charles City, James City) are
-# NOT in this set — their stems don't have a standalone "_City" at the end
-# that would be ambiguous, but we whitelist to be safe.
-_VA_CITY_STEMS: frozenset = frozenset({
-    'Alexandria_City', 'Bristol_City', 'Buena_Vista_City',
-    'Charlottesville_City', 'Chesapeake_City', 'Colonial_Heights_City',
-    'Covington_City', 'Danville_City', 'Emporia_City', 'Fairfax_City',
-    'Falls_Church_City', 'Franklin_City', 'Fredericksburg_City',
-    'Galax_City', 'Hampton_City', 'Harrisonburg_City', 'Hopewell_City',
-    'Lexington_City', 'Lynchburg_City', 'Manassas_City',
-    'Manassas_Park_City', 'Martinsville_City', 'Newport_News_City',
-    'Norfolk_City', 'Norton_City', 'Petersburg_City', 'Poquoson_City',
-    'Portsmouth_City', 'Radford_City', 'Richmond_City', 'Roanoke_City',
-    'Salem_City', 'Staunton_City', 'Suffolk_City', 'Virginia_Beach_City',
-    'Waynesboro_City', 'Williamsburg_City', 'Winchester_City',
-    # Charles_City and James_City are genuine counties — NOT in this set
-})
 
 
 def stem_to_county_name(stem: str, state_code: str) -> str:
@@ -166,8 +84,7 @@ def stem_to_county_name(stem: str, state_code: str) -> str:
     import re as _re
 
     # Canadian provinces: simple underscore → space, no suffix stripping
-    _CA = {'AB','BC','MB','NB','NL','NS','NU','ON','PE','QC','SK','YT','NT'}
-    if state_code in _CA:
+    if state_code in CA_CODES:
         return stem.replace('_', ' ')
 
     # 1. Underscores → spaces (hyphens left alone)
@@ -314,6 +231,22 @@ CREATE INDEX IF NOT EXISTS idx_bbox
     ON counties (min_lat, max_lat, min_lon, max_lon);
 CREATE INDEX IF NOT EXISTS idx_state
     ON counties (state_code);
+
+CREATE TABLE IF NOT EXISTS country_polygons (
+    id           INTEGER PRIMARY KEY,
+    country_name TEXT NOT NULL,   -- from #GsakName=, e.g. 'Iceland'
+    iso_code     TEXT NOT NULL,   -- 2-letter ISO, e.g. 'IS' ('' if unknown)
+    part_num     INTEGER NOT NULL DEFAULT 1,
+    min_lat      REAL NOT NULL,
+    max_lat      REAL NOT NULL,
+    min_lon      REAL NOT NULL,
+    max_lon      REAL NOT NULL,
+    polygon      TEXT NOT NULL    -- JSON [[lat,lon], ...]
+);
+CREATE INDEX IF NOT EXISTS idx_country_name
+    ON country_polygons (country_name);
+CREATE INDEX IF NOT EXISTS idx_country_iso
+    ON country_polygons (iso_code);
 """
 
 
@@ -321,6 +254,7 @@ def _open_db(db_path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(str(db_path))
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
+    conn.executescript(_SCHEMA)   # idempotent — CREATE IF NOT EXISTS
     return conn
 
 
@@ -397,7 +331,6 @@ def build_db(gsak_dir: Path, db_path: Path,
                 f"Country directory '{country}' not found under {gsak_dir}")
 
     conn = _open_db(db_path)
-    conn.executescript(_SCHEMA)
 
     is_hierarchical = country.lower() in _HIERARCHICAL_COUNTRIES
     is_canada = country.lower() in ('ca', 'canada')
@@ -407,9 +340,8 @@ def build_db(gsak_dir: Path, db_path: Path,
     # Hierarchical layout (US / CA): iterate state subdirectories
     # -----------------------------------------------------------------------
     if is_hierarchical:
-        _CA_CODES = {'AB','BC','MB','NB','NL','NS','NU','ON','PE','QC','SK','YT','NT'}
-        _US_CODES = set(_STATE_POSTAL.values()) - _CA_CODES
-        country_codes = _CA_CODES if is_canada else _US_CODES
+        _US_CODES = set(_STATE_POSTAL.values()) - CA_CODES
+        country_codes = CA_CODES if is_canada else _US_CODES
         placeholders = ','.join('?' * len(country_codes))
         conn.execute(
             f"DELETE FROM counties WHERE state_code IN ({placeholders})",
@@ -633,6 +565,155 @@ def batch_lookup(coords: list[tuple[float, float]],
 
 
 # ---------------------------------------------------------------------------
+# Country polygon database — build and lookup
+# ---------------------------------------------------------------------------
+
+import re as _re
+
+
+def _gsak_name_from_stem(stem: str) -> str:
+    """
+    Derive a country name from a GSAK Countries filename stem when the file
+    has no #GsakName= header.  Strips trailing run of digits (and optional
+    separator) from the stem.
+
+    Examples:
+        'Belgium23'              → 'Belgium'
+        'Iceland2'               → 'Iceland'
+        'Canada_2'               → 'Canada'
+        'Bosnia and Herzegovina1'→ 'Bosnia and Herzegovina'
+        'Czechia'                → 'Czechia'
+        'United States4'         → 'United States'
+    """
+    return _re.sub(r'[_\s]*\d+$', '', stem).strip()
+
+
+def build_countries_db(gsak_dir: Path, db_path: Path,
+                       verbose: bool = False) -> tuple[int, int]:
+    """
+    Walk gsak_dir/Countries/*.txt and populate the country_polygons table.
+
+    Returns (num_countries, num_parts).
+    Full rebuild: all existing rows are deleted before insert.
+    """
+    gsak_dir = Path(gsak_dir)
+    db_path  = Path(db_path)
+
+    # Find the Countries subdirectory case-insensitively
+    countries_dir: Path | None = None
+    for d in gsak_dir.iterdir():
+        if d.is_dir() and d.name.lower() == 'countries':
+            countries_dir = d
+            break
+    if countries_dir is None:
+        raise FileNotFoundError(
+            f"No 'Countries' subdirectory found under {gsak_dir}")
+
+    # Collect all .txt files (case-insensitive), skip version.ver etc.
+    txt_files = sorted(
+        t for t in countries_dir.iterdir()
+        if t.suffix.lower() == '.txt'
+        and t.stem.lower() not in ('version',)
+        and not t.stem.lower().startswith('version')
+    )
+    if not txt_files:
+        print(f"  No polygon files found in {countries_dir}")
+        return 0, 0
+
+    conn = _open_db(db_path)
+
+    # First pass: determine which country_names are present so we can
+    # delete-all-then-reinsert (full rebuild per the spec).
+    # We need to peek at gsakname before we can group — do a quick scan.
+    name_set: set[str] = set()
+    for txt in txt_files:
+        _, gsakname = _parse_polygon(txt)
+        cname = gsakname.strip() if gsakname else _gsak_name_from_stem(txt.stem)
+        name_set.add(cname)
+
+    placeholders = ','.join('?' * len(name_set))
+    conn.execute(
+        f"DELETE FROM country_polygons WHERE country_name IN ({placeholders})",
+        list(name_set),
+    )
+    conn.commit()
+
+    # Second pass: parse and insert, tracking part_num per country_name
+    part_counts: dict[str, int] = {}   # country_name → parts inserted so far
+    rows = []
+
+    for txt in txt_files:
+        pts, gsakname = _parse_polygon(txt)
+        cname = gsakname.strip() if gsakname else _gsak_name_from_stem(txt.stem)
+        iso   = GSAK_NAME_TO_ISO.get(cname, '')
+
+        if len(pts) < 3:
+            if verbose:
+                print(f"  Warning: {txt.name} ({cname}) has < 3 points — skipped.")
+            continue
+
+        part_num = part_counts.get(cname, 0) + 1
+        part_counts[cname] = part_num
+
+        min_lat, max_lat, min_lon, max_lon = _bbox(pts)
+        rows.append((
+            cname, iso, part_num,
+            min_lat, max_lat, min_lon, max_lon,
+            json.dumps(pts),
+        ))
+        if verbose:
+            print(f"    {cname} part {part_num}: {len(pts)} points  iso={iso or '?'}")
+
+    conn.executemany(
+        "INSERT INTO country_polygons "
+        "(country_name, iso_code, part_num, "
+        " min_lat, max_lat, min_lon, max_lon, polygon) "
+        "VALUES (?,?,?,?,?,?,?,?)",
+        rows,
+    )
+    conn.commit()
+    conn.close()
+
+    num_countries = len(part_counts)
+    num_parts     = len(rows)
+    print(f"  Countries DB built: {num_countries} countries, "
+          f"{num_parts} polygon parts total.")
+    return num_countries, num_parts
+
+
+def lookup_country(lat: float, lon: float,
+                   db_path: str | Path = 'gsak_counties.db') -> str | None:
+    """
+    Return the country_name for the given coordinates, or None.
+    Uses bbox pre-filter then point-in-polygon on stored parts.
+    """
+    db_path = str(Path(db_path).expanduser().resolve())
+    conn = _get_conn(db_path)
+    if conn is None:
+        return None
+
+    # Ensure country_polygons table exists (DB may have been opened read-only
+    # before the table was created; if so, we won't find rows but won't crash).
+    try:
+        rows = conn.execute(
+            "SELECT country_name, polygon "
+            "FROM country_polygons "
+            "WHERE min_lat <= ? AND max_lat >= ? "
+            "  AND min_lon <= ? AND max_lon >= ?",
+            [lat, lat, lon, lon],
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return None   # table doesn't exist yet
+
+    for row in rows:
+        pts = json.loads(row['polygon'])
+        if _point_in_polygon(lat, lon, pts):
+            return row['country_name']
+
+    return None
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -675,6 +756,59 @@ def _cmd_stats(args):
     conn.close()
 
 
+def _cmd_build_countries(args):
+    gsak_dir = Path(args.gsak_dir)
+    db_path  = Path(args.db)
+    print(f"Building country borders DB from {gsak_dir}/Countries ...")
+    n_countries, n_parts = build_countries_db(gsak_dir, db_path,
+                                              verbose=args.verbose)
+    print(f"Done. {n_countries} countries, {n_parts} parts → {db_path}")
+
+
+def _cmd_list_countries(args):
+    db_path = Path(args.db)
+    if not db_path.exists():
+        print(f"DB not found: {db_path}")
+        return
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+
+    if args.country:
+        rows = conn.execute(
+            "SELECT part_num, iso_code, country_name, "
+            "       min_lat, max_lat, min_lon, max_lon "
+            "FROM country_polygons "
+            "WHERE country_name = ? "
+            "ORDER BY part_num",
+            (args.country,),
+        ).fetchall()
+        if not rows:
+            print(f"No parts found for country '{args.country}'.")
+        else:
+            print(f"{args.country}  (ISO: {rows[0]['iso_code'] or '?'})")
+            for r in rows:
+                print(f"  Part {r['part_num']:>3}: "
+                      f"lat [{r['min_lat']:.4f}, {r['max_lat']:.4f}]  "
+                      f"lon [{r['min_lon']:.4f}, {r['max_lon']:.4f}]")
+    else:
+        rows = conn.execute(
+            "SELECT country_name, iso_code, COUNT(*) as parts "
+            "FROM country_polygons "
+            "GROUP BY country_name "
+            "ORDER BY country_name"
+        ).fetchall()
+        if not rows:
+            print("country_polygons table is empty — run build-countries first.")
+        else:
+            print(f"{'Country':<40} {'ISO':<5} {'Parts':>5}")
+            print('-' * 52)
+            for r in rows:
+                print(f"  {r['country_name']:<38} {r['iso_code'] or '?':<5} "
+                      f"{r['parts']:>5}")
+            print(f"\n  {len(rows)} countries total.")
+    conn.close()
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="GSAK county polygon database builder and lookup tool.\n"
@@ -707,6 +841,24 @@ def main():
     p_stat = sub.add_parser('stats', help='Show county counts per state in DB')
     p_stat.add_argument('--db', default='gsak_counties.db')
     p_stat.set_defaults(func=_cmd_stats)
+
+    # build-countries
+    p_bc = sub.add_parser('build-countries',
+                          help='Build country_polygons table from gsak/Countries/')
+    p_bc.add_argument('--gsak-dir', required=True,
+                      help='Root GSAK directory (contains Countries/ subdir)')
+    p_bc.add_argument('--db', default='gsak_counties.db',
+                      help='DB path (default: gsak_counties.db)')
+    p_bc.add_argument('--verbose', action='store_true')
+    p_bc.set_defaults(func=_cmd_build_countries)
+
+    # list-countries
+    p_lc = sub.add_parser('list-countries',
+                          help='List countries in country_polygons table')
+    p_lc.add_argument('--db', default='gsak_counties.db')
+    p_lc.add_argument('--country', default=None,
+                      help='Show parts for a specific country name')
+    p_lc.set_defaults(func=_cmd_list_countries)
 
     args = parser.parse_args()
     args.func(args)

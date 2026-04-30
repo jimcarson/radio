@@ -18,7 +18,7 @@ Dependencies:
 
 from pathlib import Path
 
-__version__ = "1.2.0"  # county/state/grid count tooltips; state border lines layer
+__version__ = "1.3.0"  # build_country_borders_overlay(); build_counties_overlay() intl DB path
 
 try:
     import yaml
@@ -490,6 +490,105 @@ def _add_state_borders(m: folium.Map, cache_path: Path = None) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Country border lines overlay
+# ---------------------------------------------------------------------------
+
+_country_borders_added: set = set()   # track per-map object id to avoid duplicates
+
+
+def build_country_borders_overlay(
+        m: folium.Map,
+        db_path,
+        country_names: list | None = None) -> None:
+    """
+    Add a country border lines layer sourced from the country_polygons table.
+
+    country_names : if provided, only render borders for these countries
+                    (pass the list of countries represented in the cache data
+                    to avoid rendering all 200+ countries at once).
+    Renders as thin lines with no fill — for geographic orientation only.
+    Safe to call multiple times on the same map (deduplicates by map id).
+    Does NOT call _add_state_borders — the caller decides whether to add
+    US/CA state borders separately.
+    """
+    import json as _json
+    import sqlite3 as _sqlite3
+
+    map_id = id(m)
+    if map_id in _country_borders_added:
+        return
+    _country_borders_added.add(map_id)
+
+    db_path = str(db_path)
+    try:
+        conn = _sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        conn.row_factory = _sqlite3.Row
+    except _sqlite3.OperationalError as exc:
+        print(f"  Country borders: could not open DB {db_path}: {exc}")
+        return
+
+    try:
+        if country_names:
+            placeholders = ','.join('?' * len(country_names))
+            rows = conn.execute(
+                f"SELECT country_name, polygon FROM country_polygons "
+                f"WHERE country_name IN ({placeholders})",
+                country_names,
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT country_name, polygon FROM country_polygons"
+            ).fetchall()
+    except _sqlite3.OperationalError as exc:
+        print(f"  Country borders: query failed (table missing?): {exc}")
+        conn.close()
+        return
+    conn.close()
+
+    if not rows:
+        print("  Country borders: no matching rows found — skipping.")
+        return
+
+    features = []
+    for row in rows:
+        pts = _json.loads(row['polygon'])
+        # pts is [[lat, lon], ...] — GeoJSON wants [[lon, lat], ...]
+        coords = [[lon, lat] for lat, lon in pts]
+        features.append({
+            'type': 'Feature',
+            'properties': {'country_name': row['country_name']},
+            'geometry': {
+                'type': 'Polygon',
+                'coordinates': [coords],
+            },
+        })
+
+    geojson = {'type': 'FeatureCollection', 'features': features}
+
+    def border_style(_feature):
+        return {
+            'fillColor':   '#000000',
+            'fillOpacity': 0.0,
+            'color':       '#444444',
+            'weight':      1.5,
+        }
+
+    fg = folium.FeatureGroup(name='Overlay: Country borders', show=True)
+    folium.GeoJson(
+        geojson,
+        style_function=border_style,
+        tooltip=folium.GeoJsonTooltip(
+            fields=['country_name'],
+            aliases=['Country'],
+            localize=True,
+        ),
+    ).add_to(fg)
+    fg.add_to(m)
+    print(f"  Country borders: {len(features)} polygon parts "
+          f"({len({r['country_name'] for r in rows})} countries).")
+
+
+# ---------------------------------------------------------------------------
 # States / provinces choropleth
 # ---------------------------------------------------------------------------
 
@@ -600,28 +699,50 @@ def build_counties_overlay(m: folium.Map, records: list,
                             key_fn=None,
                             dynamic: bool = False,
                             group_fn=None, band_fn=None,
-                            cache_path: Path = None) -> dict:
+                            cache_path: Path = None,
+                            db_path=None) -> dict:
     """
-    Add a US county choropleth layer.
+    Add a county/district choropleth layer for US, CA, and international regions.
 
     key_fn(record) -> "ST,Name" ADIF-style key, or ''
     cache_path     : override for us_counties.geojson location
+    db_path        : path to gsak_counties.db for international region polygons.
+                     Keys whose state_code is not a US/CA postal code are looked
+                     up in the DB counties table and merged into one layer.
+                     If None, only US/CA GeoJSON keys are rendered.
     """
-    import json
-    geo_path = cache_path or _COUNTIES_CACHE
+    import json as _json
+    import sqlite3 as _sqlite3
 
-    if not geo_path.exists():
+    # Determine which 2-letter codes are US/CA so we can split keys
+    _us_ca_codes: set[str] = set()
+    try:
+        from gsak_counties import _POSTAL_STATE as _ps
+        _us_ca_codes = set(_ps.keys())
+    except ImportError:
+        pass   # no gsak_counties — treat everything as US/CA (legacy behaviour)
+
+    def _is_us_ca(adif_key: str) -> bool:
+        code = adif_key.split(',', 1)[0] if ',' in adif_key else ''
+        return (not _us_ca_codes) or (code in _us_ca_codes)
+
+    # -----------------------------------------------------------------------
+    # US / CA path — load GeoJSON
+    # -----------------------------------------------------------------------
+    geo_path = cache_path or _COUNTIES_CACHE
+    geojson_features: list = []
+
+    if geo_path.exists():
+        try:
+            geojson = _json.loads(geo_path.read_text(encoding="utf-8"))
+            geojson_features = geojson.get('features', [])
+        except Exception as exc:
+            print(f"  County overlay: could not read {geo_path.name}: {exc}")
+    else:
         print(
             f"  County overlay: {geo_path.name} not found.\n"
             "  Run  python adif_setup.py  to download boundary data."
         )
-        return {}
-
-    try:
-        geojson = json.loads(geo_path.read_text(encoding="utf-8"))
-    except Exception as exc:
-        print(f"  County overlay: could not read {geo_path.name}: {exc}")
-        return {}
 
     def _default_key(r): return ''
     kfn = key_fn or _default_key
@@ -630,17 +751,81 @@ def build_counties_overlay(m: folium.Map, records: list,
     status.pop('', None); counts.pop('', None)
     conf_counts.pop('', None); work_counts.pop('', None)
 
-    # Embed per-county counts into GeoJSON properties for tooltip
-    for feat in geojson['features']:
+    # Split keys into US/CA (handled by GeoJSON) and international (handled by DB)
+    us_ca_keys = {k for k in status if _is_us_ca(k)}
+    intl_keys  = {k for k in status if not _is_us_ca(k)}
+
+    # -----------------------------------------------------------------------
+    # Embed tooltip counts into GeoJSON features (US/CA only)
+    # -----------------------------------------------------------------------
+    for feat in geojson_features:
         key = feat['properties'].get('adif_key', '')
         nc  = conf_counts.get(key, 0)
         nw  = work_counts.get(key, 0)
         feat['properties']['_tip'] = (
             f"Confirmed: {nc} | Worked: {nw}" if (nc or nw) else '')
+        # Ensure international tooltip fields exist (empty) so tooltip schema is uniform
+        feat['properties'].setdefault('county_name', feat['properties'].get('namelsad', ''))
+        feat['properties'].setdefault('state_code',  feat['properties'].get('state', ''))
+
+    # -----------------------------------------------------------------------
+    # International path — query DB for polygon rows
+    # -----------------------------------------------------------------------
+    db_features: list = []
+    if intl_keys and db_path:
+        try:
+            conn = _sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+            conn.row_factory = _sqlite3.Row
+            placeholders = ','.join('?' * len(intl_keys))
+            rows = conn.execute(
+                f"SELECT adif_key, county_name, state_code, polygon "
+                f"FROM counties WHERE adif_key IN ({placeholders})",
+                list(intl_keys),
+            ).fetchall()
+            conn.close()
+            for row in rows:
+                pts  = _json.loads(row['polygon'])
+                # pts stored as [[lat,lon],...]; GeoJSON needs [[lon,lat],...]
+                coords = [[lon, lat] for lat, lon in pts]
+                key = row['adif_key']
+                nc  = conf_counts.get(key, 0)
+                nw  = work_counts.get(key, 0)
+                db_features.append({
+                    'type': 'Feature',
+                    'properties': {
+                        'adif_key':    key,
+                        'county_name': row['county_name'],
+                        'state_code':  row['state_code'],
+                        'namelsad':    row['county_name'],   # uniform schema
+                        'state':       row['state_code'],
+                        '_tip': f"Confirmed: {nc} | Worked: {nw}" if (nc or nw) else '',
+                    },
+                    'geometry': {
+                        'type': 'Polygon',
+                        'coordinates': [coords],
+                    },
+                })
+        except _sqlite3.Error as exc:
+            print(f"  County overlay: DB query failed: {exc}")
+    elif intl_keys and not db_path:
+        print(f"  County overlay: {len(intl_keys)} international region(s) skipped "
+              f"(no --db path provided).")
+
+    # -----------------------------------------------------------------------
+    # Merge and render as a single layer
+    # -----------------------------------------------------------------------
+    all_features = geojson_features + db_features
+    if not all_features:
+        print("  County overlay: no features to render — skipping.")
+        return {}
+
+    merged = {'type': 'FeatureCollection', 'features': all_features}
 
     confirmed_n = sum(1 for s in status.values() if s == 'confirmed')
     worked_n    = sum(1 for s in status.values() if s == 'worked')
-    print(f"  County overlay: {confirmed_n} confirmed, {worked_n} worked-only counties.")
+    intl_rendered = len(db_features)
+    print(f"  County overlay: {confirmed_n} confirmed, {worked_n} worked-only "
+          f"({intl_rendered} international region(s) from DB).")
 
     def style_fn(feature):
         key  = feature['properties'].get('adif_key', '')
@@ -649,7 +834,7 @@ def build_counties_overlay(m: folium.Map, records: list,
 
     fg  = folium.FeatureGroup(name='Overlay: Counties', show=True)
     gjl = folium.GeoJson(
-        geojson,
+        merged,
         style_function=style_fn,
         tooltip=folium.GeoJsonTooltip(
             fields=['namelsad', 'state', 'adif_key', '_tip'],

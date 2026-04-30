@@ -1,6 +1,95 @@
 # Changelog
 
-## 2026-04-25
+## 2026-04-30
+
+### New files
+
+**`country_mapping.py`** — ISO 3166-1 alpha-2 ↔ GSAK country name mapping. Contains `GSAK_NAME_TO_ISO` (250 entries, keyed on canonical `#GsakName=` values) and the auto-derived inverse `ISO_TO_GSAK_NAME`. Corrects three errors present in the GSAK `countries.txt` source: Belgium/Belarus/Barbados were cyclically swapped; Belize was missing (its `BZ` code had been misassigned to Benin). Adds alias entries for old GSAK names (`Swaziland`, `East Timor`) and the de-facto `XK` code for Kosovo. Planned to be merged into `geo_mapping.py` in a future session alongside `_STATE_POSTAL`.
+
+### `gsak_counties.py` (v1.6.0)
+
+**New `country_polygons` table** added to `_SCHEMA`:
+
+```sql
+CREATE TABLE IF NOT EXISTS country_polygons (
+    id INTEGER PRIMARY KEY, country_name TEXT, iso_code TEXT,
+    part_num INTEGER, min_lat REAL, max_lat REAL, min_lon REAL, max_lon REAL,
+    polygon TEXT
+);
+```
+
+Indexes on `country_name` and `iso_code`. Schema is applied in `_open_db()` (moved from `build_db()`) so both tables are always present on any DB open.
+
+**New CLI subcommand: `build-countries`**
+
+```
+python gsak_counties.py build-countries \
+    --gsak-dir "D:/dev/radio/gsak" --db gsak_counties.db [--verbose]
+```
+
+Walks `gsak_dir/Countries/*.txt`, parses each file via the existing `_parse_polygon()`, assigns `part_num` per country (multi-part countries like Belgium store 23 separate rows), looks up ISO code from `GSAK_NAME_TO_ISO`. Full rebuild: deletes all rows for found country names before inserting. Reports country count and total part count.
+
+**New CLI subcommand: `list-countries`**
+
+```
+python gsak_counties.py list-countries --db gsak_counties.db [--country Iceland]
+```
+
+Without `--country`: tabular summary of all countries (name, ISO, part count). With `--country NAME`: lists each part with its bounding box.
+
+**New public function: `lookup_country(lat, lon, db_path)`**
+
+Returns the `country_name` string for the given coordinates, or `None`. Uses bbox pre-filter then point-in-polygon. Gracefully handles missing DB or missing table.
+
+**New helper: `_gsak_name_from_stem(stem)`** — strips trailing digits and separators from a filename stem to derive a country name when no `#GsakName=` header is present (`Belgium23` → `Belgium`).
+
+**Import:** `GSAK_NAME_TO_ISO`, `ISO_TO_GSAK_NAME` now imported from `country_mapping`.
+
+### `map_core.py` (v1.3.0)
+
+**New function: `build_country_borders_overlay(m, db_path, country_names=None)`**
+
+Adds a country border line layer from `country_polygons` table. Renders as thin dark lines (`#444444`, weight 1.5, no fill) with country name tooltip. Accepts optional `country_names` filter list to render only countries present in the cache data. Safe to call multiple times (deduplicates via `_country_borders_added` set, same pattern as `_add_state_borders`).
+
+**`build_counties_overlay()` extended** with `db_path=None` parameter. When provided:
+
+- Keys are classified as US/CA (prefix in `_POSTAL_STATE`) or international
+- US/CA keys go to the existing GeoJSON path (unchanged — no regression)
+- International keys are queried from the `counties` table by `adif_key`, polygons reconstructed from stored JSON (lat/lon flipped to GeoJSON order), tooltip properties normalised to the same schema as GeoJSON features
+- All features merged into one `FeatureCollection`, rendered as a single layer
+- If `db_path=None`: existing US/CA-only behavior unchanged
+
+### `geocache_map.py` (v1.1.0)
+
+**New `--db FILE` argument** — path to `gsak_counties.db`. Auto-detected beside the script or in CWD if not specified; warns but continues if not found.
+
+**International county/district shading** — `build_counties_overlay` now receives `db_path` and shades international regions from the GSAK polygon DB.
+
+**Country borders overlay** — when any overlay is active and a DB is available, `build_country_borders_overlay` is called automatically with the set of countries present in the filtered cache data. Borders render beneath county shading and cache dots.
+
+**Layer ordering fix** — the base map is now created first, overlays added in order (country borders → county shading), then `build_map()` adds cache dot FeatureGroups on top. Previously all overlays were added after dots, causing the country border layer to render above markers and toggle to the top when clicked.
+
+**`build_map()` now accepts optional `m=None`** — if an existing map is passed, dots are added to it; otherwise a new base map is created. Allows callers to pre-populate overlays before adding markers.
+
+**`_strip_accents()` helper** — two-pass transliterator: substitutes non-NFD-decomposable characters (`ø→o`, `ð→d`, `þ→th`, `æ→ae`, `å→a`) then strips combining accent marks via NFD. Covers Icelandic, Norse, Faroese, and Czech names.
+
+**`_cnty_key()` rewritten** to handle three distinct GPX field patterns:
+
+| Pattern | Example | Result |
+|---|---|---|
+| US/CA: 2-letter state + county field | `state='WA', county='King'` | `WA,King` |
+| US/CA: 2-letter state, no county | `state='MI', county=''` | coordinate lookup → `MI,Mason` |
+| Flat country: region name in state | `state='Höfudborgarsvaedi'` | `IS,Hofudborgarsvaedi` |
+| CZ-style: region in state, district in county | `state='Ústecký kraj', county='Decin'` | `CZ,Decin` |
+| CZ-style: region in state, no county | `state='Ústecký kraj', county=''` | coordinate lookup → `CZ,Decin` |
+
+US/CA caches with no GPX county field (the common case for GSAK exports) now use `lookup_county(lat, lon)` with `state_hint` for fast point-in-polygon resolution. International caches with a region-level state field (CZ, and potentially others) also fall back to coordinate lookup. Results memoized in `_coord_county_cache` keyed by rounded coordinates.
+
+**`countries_to_gsak_names()` helper** — maps free-text GPX country strings to canonical GSAK names via `GSAK_NAME_TO_ISO` / `ISO_TO_GSAK_NAME`, with case-insensitive fallback.
+
+**`resolve_db_path()` helper** — resolves `--db` argument with fallback search (script dir → CWD), warns if not found.
+
+
 
 ### New files
 

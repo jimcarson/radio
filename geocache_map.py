@@ -30,7 +30,7 @@ Options:
     --verbose           Show cache type breakdown and skipped count
 """
 
-__version__ = "1.0.0"  # initial release
+__version__ = "1.1.0"  # --db, intl county shading, country borders, _cnty_key rewrite
 
 import argparse
 import sys
@@ -48,6 +48,7 @@ try:
     from map_core import (
         load_theme, build_base_map,
         build_grid_overlay, build_states_overlay, build_counties_overlay,
+        build_country_borders_overlay,
         add_overlay_legend, theme_colors_js_dict,
         BAND_COLORS, DEFAULT_COLOR, STATES_COLORS, COUNTIES_COLORS,
         GRIDS_COLORS, MAP_LON_OFFSET, CONTACT_DOT,
@@ -56,6 +57,106 @@ except ImportError:
     sys.exit(
         "Missing map_core.py — ensure it is in the same directory as geocache_map.py."
     )
+
+try:
+    from gsak_counties import GSAK_NAME_TO_ISO, ISO_TO_GSAK_NAME
+    _GSAK_COUNTIES_AVAILABLE = True
+except ImportError:
+    GSAK_NAME_TO_ISO = {}
+    ISO_TO_GSAK_NAME = {}
+    _GSAK_COUNTIES_AVAILABLE = False
+
+
+def _strip_accents(s: str) -> str:
+    """
+    Transliterate accented and special characters to their ASCII equivalents.
+
+    Two-pass approach:
+      1. Substitute characters that NFD cannot decompose (ø→o, ð→d, þ→th,
+         æ→ae, å→a) — common in Norse, Faroese, and Icelandic names.
+      2. NFD-decompose and drop remaining combining accent marks (Mn category),
+         covering é→e, č→c, ü→u, ñ→n, etc.
+    """
+    import unicodedata as _ud
+    _SUBST = {
+        'ø': 'o', 'Ø': 'O',
+        'ð': 'd', 'Ð': 'D',
+        'þ': 'th', 'Þ': 'Th',
+        'æ': 'ae', 'Æ': 'Ae',
+        'å': 'a', 'Å': 'A',
+    }
+    for char, repl in _SUBST.items():
+        s = s.replace(char, repl)
+    return ''.join(
+        c for c in _ud.normalize('NFD', s)
+        if _ud.category(c) != 'Mn'
+    )
+
+
+def resolve_db_path(db_arg: str | None) -> str | None:
+    """
+    Resolve the path to gsak_counties.db.
+
+    Priority:
+      1. Explicit --db argument
+      2. gsak_counties.db beside geocache_map.py
+      3. gsak_counties.db in the current working directory
+
+    Returns the resolved path string if the file exists, else None
+    (with a warning printed).
+    """
+    import os
+    candidates = []
+    if db_arg:
+        candidates.append(Path(db_arg).expanduser().resolve())
+    candidates.append(Path(__file__).parent / "gsak_counties.db")
+    candidates.append(Path.cwd() / "gsak_counties.db")
+
+    for p in candidates:
+        if p.exists():
+            return str(p)
+
+    if db_arg:
+        print(f"  Warning: --db path not found: {db_arg} — country/county DB features disabled.")
+    else:
+        print("  Note: gsak_counties.db not found — country borders and international "
+              "county overlays will be skipped.")
+    return None
+
+
+def countries_to_gsak_names(country_strings: set[str]) -> list[str]:
+    """
+    Convert a set of country strings from GPX <country> fields to GSAK
+    country names suitable for build_country_borders_overlay().
+
+    GPX country fields are free-text (e.g. 'United States', 'Iceland').
+    We resolve via ISO_TO_GSAK_NAME: first map the GPX string to an ISO
+    code via GSAK_NAME_TO_ISO (which covers the common spellings), then
+    map the ISO code back to the canonical GSAK name.
+
+    Falls back to the raw string if no mapping is found — it may still
+    match a country_polygons row by name.
+    """
+    gsak_names: list[str] = []
+    seen: set[str] = set()
+    for country_str in country_strings:
+        if not country_str:
+            continue
+        # Try direct GSAK name lookup first
+        iso = GSAK_NAME_TO_ISO.get(country_str)
+        if iso:
+            gsak_name = ISO_TO_GSAK_NAME.get(iso, country_str)
+        else:
+            # Try case-insensitive scan as fallback
+            lower = country_str.lower()
+            gsak_name = next(
+                (n for n in GSAK_NAME_TO_ISO if n.lower() == lower),
+                country_str,
+            )
+        if gsak_name not in seen:
+            seen.add(gsak_name)
+            gsak_names.append(gsak_name)
+    return gsak_names
 
 
 # ---------------------------------------------------------------------------
@@ -197,12 +298,14 @@ def parse_gpx(gpx_path: Path) -> list[dict]:
             continue
 
         gc_code = wpt.findtext(f'{{{ns_uri}}}n') or ''
-        name_el = _find_gs(wpt, 'name')
-        name    = name_el.text.strip() if name_el is not None else (
-                    wpt.findtext(f'{{{ns_uri}}}urlname') or gc_code)
 
-        type_el = _find_gs(wpt, 'type')
-        raw_type = type_el.text.strip() if type_el is not None else ''
+        def _gs_text(tag: str, default: str = '') -> str:
+            """Get text of a groundspeak child element; '' if absent or empty."""
+            el = _find_gs(wpt, tag)
+            return el.text.strip() if el is not None and el.text else default
+
+        name     = _gs_text('name') or wpt.findtext(f'{{{ns_uri}}}urlname') or gc_code
+        raw_type = _gs_text('type')
         # Also try the <type> wpt-level field: "Geocache|Traditional Cache|Found"
         if not raw_type:
             wpt_type = wpt.findtext(f'{{{ns_uri}}}type') or ''
@@ -211,19 +314,19 @@ def parse_gpx(gpx_path: Path) -> list[dict]:
 
         cache_type = resolve_cache_type(raw_type)
 
-        diff_el   = _find_gs(wpt, 'difficulty')
-        terr_el   = _find_gs(wpt, 'terrain')
-        difficulty = float(diff_el.text) if diff_el is not None and diff_el.text else 0.0
-        terrain    = float(terr_el.text) if terr_el is not None and terr_el.text else 0.0
+        try:
+            difficulty = float(_gs_text('difficulty') or 0)
+        except ValueError:
+            difficulty = 0.0
+        try:
+            terrain = float(_gs_text('terrain') or 0)
+        except ValueError:
+            terrain = 0.0
 
-        placed_el  = _find_gs(wpt, 'placed_by')
-        placed_by  = placed_el.text.strip() if placed_el is not None else ''
-        cont_el    = _find_gs(wpt, 'container')
-        container  = cont_el.text.strip() if cont_el is not None else ''
-        cntry_el   = _find_gs(wpt, 'country')
-        country    = cntry_el.text.strip() if cntry_el is not None else ''
-        state_el   = _find_gs(wpt, 'state')
-        state      = state_el.text.strip() if state_el is not None else ''
+        placed_by = _gs_text('placed_by')
+        container = _gs_text('container')
+        country   = _gs_text('country')
+        state     = _gs_text('state')
 
         sym  = wpt.findtext(f'{{{ns_uri}}}sym') or ''
         url  = wpt.findtext(f'{{{ns_uri}}}url') or ''
@@ -328,14 +431,20 @@ def apply_filters(caches: list, args) -> list:
 # Map building
 # ---------------------------------------------------------------------------
 
-def build_map(center: tuple, caches: list) -> tuple[folium.Map, int]:
+def build_map(center: tuple, caches: list,
+              m: folium.Map = None) -> tuple[folium.Map, int]:
     """
     Build the geocache map. Returns (map, plotted_count).
     Caches are grouped by type into FeatureGroups with MarkerCluster.
+
+    m : if provided, dots are added to this existing map (allows overlays to
+        be added first so they render beneath the cache markers in Leaflet).
+        If None, a new base map is created.
     """
     from folium.plugins import MarkerCluster
 
-    m = build_base_map(center[0], center[1], zoom_start=7)
+    if m is None:
+        m = build_base_map(center[0], center[1], zoom_start=7)
 
     cluster_icon_fn = """
         function(cluster) {
@@ -685,6 +794,10 @@ def main():
                         help="Output HTML path (default: map_output.html beside GPX)")
     parser.add_argument("--verbose", action="store_true",
                         help="Show cache type breakdown")
+    parser.add_argument("--db",
+                        help="Path to gsak_counties.db for country borders and "
+                             "international county overlays "
+                             "(default: auto-detect beside script or in CWD)")
     args = parser.parse_args()
 
     gpx_path = Path(args.gpx).expanduser().resolve()
@@ -692,6 +805,9 @@ def main():
         sys.exit(f"File not found: {gpx_path}")
 
     load_theme(args.theme, script_dir=Path(__file__).parent)
+
+    # Resolve DB path early so we can report its status before building
+    db_path = resolve_db_path(getattr(args, 'db', None))
 
     print(f"Parsing {gpx_path.name} ...")
     all_caches = parse_gpx(gpx_path)
@@ -702,6 +818,9 @@ def main():
 
     if not filtered:
         sys.exit("No caches to plot after filtering.")
+
+    # Collect country names present in filtered data for border overlay
+    represented_countries = {c['country'] for c in filtered if c.get('country')}
 
     if args.verbose:
         from collections import Counter
@@ -715,15 +834,129 @@ def main():
     center  = (avg_lat, avg_lon)
 
     print("Building map ...")
-    m, plotted = build_map(center, filtered)
+    center = (avg_lat, avg_lon)
 
-    # Get type_fgs for the filter panel — we need to rebuild the mapping
-    # (build_map already added them; we reconstruct names from the map layers)
+    # Create base map first so overlays can be added before cache dot layers.
+    # Leaflet renders FeatureGroups in insertion order — overlays added here
+    # will sit beneath the cache markers added by build_map() below.
+    m = map_core.build_base_map(center[0], center[1], zoom_start=7)
+
+    # Overlays (reuse map_core builders; key functions work on geocache dicts)
+    overlay_meta = {}
+    overlays = [o.strip().lower() for o in (args.overlay or '').split(',') if o.strip()]
+
+    def _us_key(c): return c.get('state','').upper().strip()[:2] if c.get('country','').lower() in ('united states','us','usa') else ''
+
+    # Pre-build the set of known US/CA postal codes for fast lookup
+    try:
+        from gsak_counties import _POSTAL_STATE as _ps, lookup_county as _lookup_county
+        _us_ca_codes: set = set(_ps.keys())
+    except ImportError:
+        _us_ca_codes = set()
+        _lookup_county = None
+
+    # Coordinate → (state, county) lookup cache — avoids redundant DB hits
+    # for multiple caches in the same county
+    _coord_county_cache: dict = {}
+
+    def _cnty_key(c):
+        import re as _re
+        state  = c.get('state',  '').strip()
+        county = c.get('county', '').strip()
+
+        # Strip common admin suffixes from county field (US/CA only meaningful,
+        # but safe to apply universally since intl names won't have them)
+        def _clean_county(s):
+            return _re.sub(
+                r'\s+(County|Parish|Borough|Census Area|Municipality)\s*$',
+                '', s, flags=_re.IGNORECASE,
+            ).strip()
+
+        if state in _us_ca_codes:
+            # US or CA: state field IS the 2-letter postal code
+            if county:
+                return f"{state},{_clean_county(county)}"
+            # No county in GPX — do a coordinate-based DB lookup
+            if _lookup_county is None or not db_path:
+                return ''
+            lat, lon = c.get('lat', 0.0), c.get('lon', 0.0)
+            cache_key = (round(lat, 5), round(lon, 5))
+            if cache_key not in _coord_county_cache:
+                sc, cn = _lookup_county(lat, lon, db_path=db_path,
+                                        state_hint=state)
+                _coord_county_cache[cache_key] = (sc, cn)
+            sc, cn = _coord_county_cache[cache_key]
+            if sc and cn:
+                return f"{sc},{cn}"
+            return ''
+
+        # International cache: state field is a region/province name
+        country_str = c.get('country', '')
+        iso = GSAK_NAME_TO_ISO.get(country_str) or GSAK_NAME_TO_ISO.get(
+            next((n for n in GSAK_NAME_TO_ISO
+                  if n.lower() == country_str.lower()), ''), '')
+        if not iso:
+            return ''   # unknown country — skip
+
+        if county:
+            # GSAK populated the county field (e.g. CZ district name) — prefer it.
+            # Strip accents to match DB filenames (Hlavní → Hlavni, etc.)
+            return f"{iso},{_strip_accents(_clean_county(county))}"
+
+        # No county field: try state field as region name first (works for flat
+        # countries like Iceland, Norway where state == district).
+        if not state:
+            return ''
+        key_from_state = f"{iso},{_strip_accents(state)}"
+
+        # For countries like CZ where the GPX state is a *region* (Ústecký kraj)
+        # but the DB has *districts* (Decin, Litomerice, ...), the state-derived
+        # key won't match. Fall back to a coordinate lookup in that case.
+        # We always try the state key first via the overlay's status dict; if it
+        # misses there, the coordinate lookup will find the right district row.
+        # We pre-populate the cache here so build_counties_overlay sees a hit.
+        if _lookup_county is not None and db_path:
+            lat, lon = c.get('lat', 0.0), c.get('lon', 0.0)
+            coord_key = (round(lat, 5), round(lon, 5))
+            if coord_key not in _coord_county_cache:
+                sc, cn = _lookup_county(lat, lon, db_path=db_path,
+                                        state_hint=iso)
+                _coord_county_cache[coord_key] = (sc, cn)
+            sc, cn = _coord_county_cache[coord_key]
+            if sc and cn:
+                return f"{sc},{cn}"   # e.g. 'CZ,Decin'
+
+        return key_from_state
+
+    def _grid_key(c): return ''   # GPX doesn't carry grid squares
+    def _grp_fn(c): return c.get('type','Other')
+    def _band_fn(c): return c.get('type','Other')  # reuse band slot for type
+
+    # Country borders first — renders beneath county shading and cache dots
+    if overlays and db_path:
+        print("Building country borders overlay ...")
+        gsak_names = countries_to_gsak_names(represented_countries)
+        build_country_borders_overlay(m, db_path, country_names=gsak_names or None)
+
+    if 'states' in overlays:
+        print("Building states overlay ...")
+        result = build_states_overlay(m, filtered, us_key_fn=_us_key)
+        if result:
+            overlay_meta['states'] = result
+    if 'counties' in overlays:
+        print("Building counties overlay ...")
+        result = build_counties_overlay(m, filtered, key_fn=_cnty_key,
+                                        db_path=db_path)
+        if result:
+            overlay_meta['counties'] = result
+    if overlays:
+        add_overlay_legend(m, [o for o in overlays if o in ('states','counties','grids')])
+
+    # Add cache dots on top of all overlays
+    m, plotted = build_map(center, filtered, m=m)
+
+    # Get type_fgs for the filter panel
     types_present = {c['type'] for c in filtered}
-
-    # Collect FeatureGroup objects added to the map for the filter panel
-    # We pass the layer names via a second pass through build_map's logic
-    # Simpler: re-collect by matching layer names
     type_fg_refs: dict = {}
     for layer in m._children.values():
         if isinstance(layer, folium.FeatureGroup):
@@ -736,35 +969,6 @@ def main():
                         break
 
     add_type_legend(m, types_present)
-
-    # Overlays (reuse map_core builders; key functions work on geocache dicts)
-    overlay_meta = {}
-    overlays = [o.strip().lower() for o in (args.overlay or '').split(',') if o.strip()]
-
-    def _us_key(c): return c.get('state','').upper().strip()[:2] if c.get('country','').lower() in ('united states','us','usa') else ''
-    def _cnty_key(c):
-        state = c.get('state','').strip().upper()
-        county = c.get('county','').strip()
-        if not state or not county: return ''
-        import re as _re
-        county = _re.sub(r'\s+(County|Parish|Borough|Census Area|Municipality)\s*$','',county,flags=_re.IGNORECASE).strip()
-        return f"{state},{county}"
-    def _grid_key(c): return ''   # GPX doesn't carry grid squares
-    def _grp_fn(c): return c.get('type','Other')
-    def _band_fn(c): return c.get('type','Other')  # reuse band slot for type
-
-    if 'states' in overlays:
-        print("Building states overlay ...")
-        result = build_states_overlay(m, filtered, us_key_fn=_us_key)
-        if result:
-            overlay_meta['states'] = result
-    if 'counties' in overlays:
-        print("Building counties overlay ...")
-        result = build_counties_overlay(m, filtered, key_fn=_cnty_key)
-        if result:
-            overlay_meta['counties'] = result
-    if overlays:
-        add_overlay_legend(m, [o for o in overlays if o in ('states','counties','grids')])
 
     if args.show_filters:
         inject_filter_panel(m, filtered, type_fg_refs, types_present)
