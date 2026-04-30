@@ -1,0 +1,248 @@
+GSAK Name	ISO Name	2LA	3LA	Domain
+Afghanistan	Afghanistan	AF	AFG	.af
+Aland Islands	Åland Islands	AX	ALA	.ax
+Albania	Albania	AL	ALB	.al
+Algeria	Algeria	DZ	DZA	.dz
+American Samoa	American Samoa	AS	ASM	.as
+Andorra	Andorra	AD	AND	.ad
+Angola	Angola	AO	AGO	.ao
+Anguilla	Anguilla	AI	AIA	.ai
+Antarctica	Antarctica	AQ	ATA	.aq
+Antigua and Barbuda	Antigua and Barbuda	AG	ATG	.ag
+Argentina	Argentina	AR	ARG	.ar
+Armenia	Armenia	AM	ARM	.am
+Aruba	Aruba	AW	ABW	.aw
+Australia	Australia	AU	AUS	.au
+Austria	Austria	AT	AUT	.at
+Azerbaijan	Azerbaijan	AZ	AZE	.az
+Bahamas	Bahamas (the)	BS	BHS	.bs
+Bahrain	Bahrain	BH	BHR	.bh
+Bangladesh	Bangladesh	BD	BGD	.bd
+Belarus	Barbados	BB	BRB	.bb
+Belgium	Belarus	BY	BLR	.by
+Belize	Belgium	BE	BEL	.be
+Benin	Belize	BZ	BLZ	.bz
+Benin	Benin	BJ	BEN	.bj
+Bermuda	Bermuda	BM	BMU	.bm
+Bhutan	Bhutan	BT	BTN	.bt
+Bolivia	Bolivia (Plurinational State of)	BO	BOL	.bo
+Bonaire	Bonaire	BQ	BES	.bq
+Bosnia and Herzegovina	Bosnia and Herzegovina	BA	BIH	.ba
+Botswana	Botswana	BW	BWA	.bw
+Bouvet Island	Bouvet Island	BV	BVT	[d]
+Brazil	Brazil	BR	BRA	.br
+British Indian Ocean Territories	British Indian Ocean Territory (the)	IO	IOT	.io
+Brunei	Brunei Darussalam	BN	BRN	.bn
+Bulgaria	Bulgaria	BG	BGR	.bg
+Burkina Faso	Burkina Faso	BF	BFA	.bf
+Burundi	Burundi	BI	BDI	.bi
+Cabo Verde	Cabo Verde	CV	CPV	.cv
+Cambodia	Cambodia	KH	KHM	.kh
+Cameroon	Cameroon	CM	CMR	.cm
+Canada	Canada	CA	CAN	.ca
+Cayman Islands	Cayman Islands (the)	KY	CYM	.ky
+Central African Republic	Central African Republic (the)	CF	CAF	.cf
+Chad	Chad	TD	TCD	.td
+Chile	Chile	CL	CHL	.cl
+China	China	CN	CHN	.cn
+Christmas Island	Christmas Island	CX	CXR	.cx
+Cocos (Keeling) Islands	Cocos (Keeling) Islands (the)	CC	CCK	.cc
+Colombia	Colombia	CO	COL	.co
+Comoros	Comoros (the)	KM	COM	.km
+Democratic Republic of the Congo	Congo (the Democratic Republic of the)	CD	COD	.cd
+Congo	Congo (the)	CG	COG	.cg
+Cook Islands	Cook Islands (the)	CK	COK	.ck
+Costa Rica	Costa Rica	CR	CRI	.cr
+Ivory Coast	Côte d'Ivoire	CI	CIV	.ci
+Croatia	Croatia	HR	HRV	.hr
+Cuba	Cuba	CU	CUB	.cu
+Curacao	Curaçao	CW	CUW	.cw
+Cyprus	Cyprus	CY	CYP	.cy
+Czechia	Czechia	CZ	CZE	.cz
+Denmark	Denmark	DK	DNK	.dk
+Djibouti	Djibouti	DJ	DJI	.dj
+Dominica	Dominica	DM	DMA	.dm
+Dominican Republic	Dominican Republic (the)	DO	DOM	.do
+Ecuador	Ecuador	EC	ECU	.ec
+Egypt	Egypt	EG	EGY	.eg
+El Salvador	El Salvador	SV	SLV	.sv
+Equatorial Guinea	Equatorial Guinea	GQ	GNQ	.gq
+Eritrea	Eritrea	ER	ERI	.er
+Estonia	Estonia	EE	EST	.ee
+Eswatini	Eswatini	SZ	SWZ	.sz
+Ethiopia	Ethiopia	ET	ETH	.et
+Falkland Islands	Falkland Islands (the)	FK	FLK	.fk
+Faroe Islands	Faroe Islands (the)	FO	FRO	.fo
+Fiji	Fiji	FJ	FJI	.fj
+Finland	Finland	FI	FIN	.fi
+France	France	FR	FRA	.fr
+French Guiana	French Guiana	GF	GUF	.gf
+French Polynesia	French Polynesia	PF	PYF	.pf
+French Southern Territories	French Southern Territories (the)	TF	ATF	.tf
+Gabon	Gabon	GA	GAB	.ga
+Gambia	Gambia (the)	GM	GMB	.gm
+Georgia	Georgia	GE	GEO	.ge
+Germany	Germany	DE	DEU	.de
+Ghana	Ghana	GH	GHA	.gh
+Gibraltar	Gibraltar	GI	GIB	.gi
+Greece	Greece	GR	GRC	.gr
+Greenland	Greenland	GL	GRL	.gl
+Grenada	Grenada	GD	GRD	.gd
+Guadeloupe	Guadeloupe	GP	GLP	.gp
+Guam	Guam	GU	GUM	.gu
+Guatemala	Guatemala	GT	GTM	.gt
+Guernsey	Guernsey	GG	GGY	.gg
+Guinea	Guinea	GN	GIN	.gn
+Guinea-Bissau	Guinea-Bissau	GW	GNB	.gw
+Guyana	Guyana	GY	GUY	.gy
+Haitai	Haiti	HT	HTI	.ht
+Heard Island And Mcdonald Islands	Heard Island and McDonald Islands	HM	HMD	.hm
+Vatican City State	Holy See (the)	VA	VAT	.va
+Honduras	Honduras	HN	HND	.hn
+Hong Kong	Hong Kong	HK	HKG	.hk
+Hungary	Hungary	HU	HUN	.hu
+Iceland	Iceland	IS	ISL	.is
+India	India	IN	IND	.in
+Indonesia	Indonesia	ID	IDN	.id
+Iran	Iran (Islamic Republic of)	IR	IRN	.ir
+Iraq	Iraq	IQ	IRQ	.iq
+Ireland	Ireland	IE	IRL	.ie
+Isle of Man	Isle of Man	IM	IMN	.im
+Israel	Israel	IL	ISR	.il
+Italy	Italy	IT	ITA	.it
+Jamaica	Jamaica	JM	JAM	.jm
+Japan	Japan	JP	JPN	.jp
+Jersey	Jersey	JE	JEY	.je
+Jordan	Jordan	JO	JOR	.jo
+Kazakhstan	Kazakhstan	KZ	KAZ	.kz
+Kenya	Kenya	KE	KEN	.ke
+Kiribati	Kiribati	KI	KIR	.ki
+North Korea	Korea (the Democratic People's Republic of)	KP	PRK	.kp
+South Korea	Korea (the Republic of)	KR	KOR	.kr
+Kuwait	Kuwait	KW	KWT	.kw
+Kyrgyzstan	Kyrgyzstan	KG	KGZ	.kg
+Laos	Lao People's Democratic Republic (the)	LA	LAO	.la
+Latvia	Latvia	LV	LVA	.lv
+Lebanon	Lebanon	LB	LBN	.lb
+Lesotho	Lesotho	LS	LSO	.ls
+Liberia	Liberia	LR	LBR	.lr
+Libya	Libya	LY	LBY	.ly
+Liechtenstein	Liechtenstein	LI	LIE	.li
+Lithuania	Lithuania	LT	LTU	.lt
+Luxembourg	Luxembourg	LU	LUX	.lu
+Macau	Macao	MO	MAC	.mo
+Madagascar	Madagascar	MG	MDG	.mg
+Malawi	Malawi	MW	MWI	.mw
+Malaysia	Malaysia	MY	MYS	.my
+Maldives	Maldives	MV	MDV	.mv
+Mali	Mali	ML	MLI	.ml
+Malta	Malta	MT	MLT	.mt
+Marshall Islands	Marshall Islands (the)	MH	MHL	.mh
+Martinique	Martinique	MQ	MTQ	.mq
+Mauritania	Mauritania	MR	MRT	.mr
+Mauritius	Mauritius	MU	MUS	.mu
+Mayotte	Mayotte	YT	MYT	.yt
+Mexico	Mexico	MX	MEX	.mx
+Micronesia	Micronesia (Federated States of)	FM	FSM	.fm
+Moldova	Moldova (the Republic of)	MD	MDA	.md
+Monaco	Monaco	MC	MCO	.mc
+Mongolia	Mongolia	MN	MNG	.mn
+Montenegro	Montenegro	ME	MNE	.me
+Montserrat	Montserrat	MS	MSR	.ms
+Morocco	Morocco	MA	MAR	.ma
+Mozambique	Mozambique	MZ	MOZ	.mz
+Myanmar	Myanmar	MM	MMR	.mm
+Namibia	Namibia	NA	NAM	.na
+Nauru	Nauru	NR	NRU	.nr
+Nepal	Nepal	NP	NPL	.np
+Netherlands	Netherlands (Kingdom of the)	NL	NLD	.nl
+New Caledonia	New Caledonia	NC	NCL	.nc
+New Zealand	New Zealand	NZ	NZL	.nz
+Nicaragua	Nicaragua	NI	NIC	.ni
+Niger	Niger (the)	NE	NER	.ne
+Nigeria	Nigeria	NG	NGA	.ng
+Niue	Niue	NU	NIU	.nu
+Norfolk Island	Norfolk Island	NF	NFK	.nf
+Macedonia	North Macedonia	MK	MKD	.mk
+Northern Mariana Islands	Northern Mariana Islands (the)	MP	MNP	.mp
+Norway	Norway	NO	NOR	.no
+Oman	Oman	OM	OMN	.om
+Pakistan	Pakistan	PK	PAK	.pk
+Palau	Palau	PW	PLW	.pw
+Panama	Panama	PA	PAN	.pa
+Papua New Guinea	Papua New Guinea	PG	PNG	.pg
+Paraguay	Paraguay	PY	PRY	.py
+Peru	Peru	PE	PER	.pe
+Philippines	Philippines (the)	PH	PHL	.ph
+Pitcairn Islands	Pitcairn	PN	PCN	.pn
+Poland	Poland	PL	POL	.pl
+Portugal	Portugal	PT	PRT	.pt
+Puerto Rico	Puerto Rico	PR	PRI	.pr
+Qatar	Qatar	QA	QAT	.qa
+Reunion	Réunion	RE	REU	.re
+Romania	Romania	RO	ROU	.ro
+Russia	Russian Federation (the)	RU	RUS	.ru
+Rwanda	Rwanda	RW	RWA	.rw
+St Barthelemy	Saint Barthélemy	BL	BLM	.bl
+Saint Helena	Saint Helena	SH	SHN	.sh
+Saint Kitts and Nevis	Saint Kitts and Nevis	KN	KNA	.kn
+Saint Lucia	Saint Lucia	LC	LCA	.lc
+St. Martin	Saint Martin (French part)	MF	MAF	.mf
+St Pierre Miquelon	Saint Pierre and Miquelon	PM	SPM	.pm
+St Vince Grenadines	Saint Vincent and the Grenadines	VC	VCT	.vc
+Samoa	Samoa	WS	WSM	.ws
+San Marino	San Marino	SM	SMR	.sm
+Sao Tome and Principe	Sao Tome and Principe	ST	STP	.st
+Saudi Arabia	Saudi Arabia	SA	SAU	.sa
+Senegal	Senegal	SN	SEN	.sn
+Serbia	Serbia	RS	SRB	.rs
+Seychelles	Seychelles	SC	SYC	.sc
+Sierra Leone	Sierra Leone	SL	SLE	.sl
+Singapore	Singapore	SG	SGP	.sg
+Sint Maarten	Sint Maarten (Dutch part)	SX	SXM	.sx
+Slovakia	Slovakia	SK	SVK	.sk
+Slovenia	Slovenia	SI	SVN	.si
+Solomon Islands	Solomon Islands	SB	SLB	.sb
+Somalia	Somalia	SO	SOM	.so
+South Africa	South Africa	ZA	ZAF	.za
+South Georgia and Sandwich Islands	South Georgia and the South Sandwich Islands	GS	SGS	.gs
+South Sudan	South Sudan	SS	SSD	.ss
+Spain	Spain	ES	ESP	.es
+Sri Lanka	Sri Lanka	LK	LKA	.lk
+Sudan	Sudan (the)	SD	SDN	.sd
+Suriname	Suriname	SR	SUR	.sr
+Svalbard and Jan Mayen	Svalbard	SJ	SJM	[x]
+Sweden	Sweden	SE	SWE	.se
+Switzerland	Switzerland	CH	CHE	.ch
+Syria	Syrian Arab Republic (the)	SY	SYR	.sy
+Taiwan	Taiwan (Province of China)	TW	TWN	.tw
+Tajikistan	Tajikistan	TJ	TJK	.tj
+Tanzania	Tanzania, the United Republic of	TZ	TZA	.tz
+Thailand	Thailand	TH	THA	.th
+Timor-Leste	Timor-Leste	TL	TLS	.tl
+Togo	Togo	TG	TGO	.tg
+Tokelau	Tokelau	TK	TKL	.tk
+Tonga	Tonga	TO	TON	.to
+Trinidad and Tobago	Trinidad and Tobago	TT	TTO	.tt
+Tunisia	Tunisia	TN	TUN	.tn
+Turkey	Türkiye	TR	TUR	.tr
+Turkmenistan	Turkmenistan	TM	TKM	.tm
+Turks and Caicos Islands	Turks and Caicos Islands (the)	TC	TCA	.tc
+Tuvalu	Tuvalu	TV	TUV	.tv
+Uganda	Uganda	UG	UGA	.ug
+Ukraine	Ukraine	UA	UKR	.ua
+United Arab Emirates	United Arab Emirates (the)	AE	ARE	.ae
+United Kingdom	United Kingdom of Great Britain and Northern Ireland (the)	GB	GBR	.gb
+United States	United States of America (the)	US	USA	.us
+Uruguay	Uruguay	UY	URY	.uy
+Uzbekistan	Uzbekistan	UZ	UZB	.uz
+Vanuatu	Vanuatu	VU	VUT	.vu
+Venezuela	Venezuela (Bolivarian Republic of)	VE	VEN	.ve
+Vietnam	Viet Nam	VN	VNM	.vn
+British Virgin Islands	Virgin Islands (British)	VG	VGB	.vg
+US Virgin Islands	Virgin Islands (U.S.)	VI	VIR	.vi
+Wallis And Futuna Islands	Wallis and Futuna	WF	WLF	.wf
+Western Sahara	Western Sahara	EH	ESH	[am]
+Yemen	Yemen	YE	YEM	.ye
+Zambia	Zambia	ZM	ZMB	.zm
+Zimbabwe	Zimbabwe	ZW	ZWE	.zw
