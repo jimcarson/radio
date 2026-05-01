@@ -18,7 +18,7 @@ Dependencies:
 
 from pathlib import Path
 
-__version__ = "1.4.1"  # consolidate imports (json, sqlite3, copy to top-level); remove unused cfg variable; fix triple blank line
+__version__ = "1.4.2"  # fix Canadian county routing: _is_us_ca() now uses US-only codes so CA province keys go to DB path instead of being silently dropped by GeoJSON path
 
 try:
     import yaml
@@ -705,17 +705,25 @@ def build_counties_overlay(m: folium.Map, records: list,
                      up in the DB counties table and merged into one layer.
                      If None, only US/CA GeoJSON keys are rendered.
     """
-    # Determine which 2-letter codes are US/CA so we can split keys
-    _us_ca_codes: set[str] = set()
-    try:
-        from gsak_counties import _POSTAL_STATE as _ps
-        _us_ca_codes = set(_ps.keys())
-    except ImportError:
-        pass   # no gsak_counties — treat everything as US/CA (legacy behaviour)
+    # US state/territory postal codes — the only keys that belong in us_counties.geojson.
+    # Canadian province codes (BC, QC, ON …) intentionally excluded: their county
+    # polygons live in gsak_counties.db, not in the GeoJSON file.
+    _US_ONLY_CODES: set[str] = {
+        'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA',
+        'HI','ID','IL','IN','IA','KS','KY','LA','ME','MD',
+        'MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ',
+        'NM','NY','NC','ND','OH','OK','OR','PA','RI','SC',
+        'SD','TN','TX','UT','VT','VA','WA','WV','WI','WY',
+        'DC','AS','GU','MP','PR','VI',   # territories
+    }
 
     def _is_us_ca(adif_key: str) -> bool:
+        """Return True only for US state/territory keys (GeoJSON path).
+        Canadian province codes are intentionally excluded so they are
+        routed to the DB path alongside other international regions.
+        """
         code = adif_key.split(',', 1)[0] if ',' in adif_key else ''
-        return (not _us_ca_codes) or (code in _us_ca_codes)
+        return code in _US_ONLY_CODES
 
     # -----------------------------------------------------------------------
     # US / CA path — load GeoJSON
