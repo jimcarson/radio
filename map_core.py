@@ -18,7 +18,7 @@ Dependencies:
 
 from pathlib import Path
 
-__version__ = "1.3.0"  # build_country_borders_overlay(); build_counties_overlay() intl DB path
+__version__ = "1.4.0"  # interactive=False on state borders + country borders (fixes county tooltip occlusion)
 
 try:
     import yaml
@@ -485,6 +485,7 @@ def _add_state_borders(m: folium.Map, cache_path: Path = None) -> None:
         geojson,
         style_function=border_style,
         tooltip=None,
+        interactive=False,   # pass mouse events through to counties/cache dots below
     ).add_to(fg)
     fg.add_to(m)
 
@@ -582,6 +583,7 @@ def build_country_borders_overlay(
             aliases=['Country'],
             localize=True,
         ),
+        interactive=False,   # pass mouse events through to counties/cache dots below
     ).add_to(fg)
     fg.add_to(m)
     print(f"  Country borders: {len(features)} polygon parts "

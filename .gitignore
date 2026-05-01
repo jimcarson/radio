@@ -17,3 +17,5 @@ liberty.csv reco.*
 temp
 us_counties_light.geojson
 .gitignore
+# Ignore vim turds
+*.swp

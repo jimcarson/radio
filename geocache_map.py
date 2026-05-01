@@ -30,7 +30,7 @@ Options:
     --verbose           Show cache type breakdown and skipped count
 """
 
-__version__ = "1.1.0"  # --db, intl county shading, country borders, _cnty_key rewrite
+__version__ = "1.3.0"  # split _us/_ca codes, _ca_key for provinces; tooltip fix moved to map_core
 
 import argparse
 import sys
@@ -332,14 +332,20 @@ def parse_gpx(gpx_path: Path) -> list[dict]:
         url  = wpt.findtext(f'{{{ns_uri}}}url') or ''
         found = 'found' in sym.lower()
 
-        # GSAK county extension
+        # GSAK county extension — lives inside <groundspeak:cache>, not on <wpt>
         county = ''
-        gsak_ext = wpt.find(f'gsak:wptExtension/gsak:County', _NS)
-        if gsak_ext is None:
-            gsak_ext = wpt.find(
-                f'{{{_NS["gsak"]}}}wptExtension/{{{_NS["gsak"]}}}County')
-        if gsak_ext is not None and gsak_ext.text:
-            county = gsak_ext.text.strip()
+        # Find the groundspeak:cache element first (already traversed above via _find_gs,
+        # but we need the element itself to search within it)
+        gs_cache_el = wpt.find(f'groundspeak:cache', _NS)
+        if gs_cache_el is None:
+            gs_cache_el = wpt.find(f'{{{_NS_GS_ALT}}}cache')
+        if gs_cache_el is not None:
+            gsak_ext = gs_cache_el.find(f'gsak:wptExtension/gsak:County', _NS)
+            if gsak_ext is None:
+                gsak_ext = gs_cache_el.find(
+                    f'{{{_NS["gsak"]}}}wptExtension/{{{_NS["gsak"]}}}County')
+            if gsak_ext is not None and gsak_ext.text:
+                county = gsak_ext.text.strip()
 
         # Skip non-cache waypoints (Final Location, Parking, etc.)
         wpt_type_raw = wpt.findtext(f'{{{ns_uri}}}type') or ''
@@ -478,16 +484,27 @@ def build_map(center: tuple, caches: list,
             dt_str = f" | D{c['difficulty']}/T{c['terrain']}"
         found_str = ' ✓ Found' if c['found'] else ''
         url_html  = f' <a href="{c["url"]}" target="_blank">↗</a>' if c['url'] else ''
+
+        # Escape backticks so cache names containing ` don't break JS template
+        # literals that folium uses internally when embedding tooltip/popup text.
+        def _js_safe(s: str) -> str:
+            return s.replace('`', '\u0060'.replace('\u0060', '&#96;'))
+
+        safe_name     = c['name'].replace('`', '&#96;')
+        safe_placed   = c['placed_by'].replace('`', '&#96;')
+        safe_gc_code  = c['gc_code'].replace('`', '&#96;')
+        safe_county   = c['county'].replace('`', '&#96;')
+
         tooltip_text = (
-            f"{c['gc_code']} — {c['name']}{dt_str}{found_str}"
+            f"{safe_gc_code} — {safe_name}{dt_str}{found_str}"
         )
         popup_html = (
-            f"<b>{c['gc_code']}</b>{url_html}<br>"
-            f"{c['name']}<br>"
+            f"<b>{safe_gc_code}</b>{url_html}<br>"
+            f"{safe_name}<br>"
             f"Type: {ctype}<br>"
             f"D/T: {c['difficulty']}/{c['terrain']}<br>"
-            f"By: {c['placed_by']}"
-            + (f"<br>County: {c['county']}" if c['county'] else '')
+            f"By: {safe_placed}"
+            + (f"<br>County: {safe_county}" if c['county'] else '')
             + (f"<br><b>Found</b>" if c['found'] else '')
         )
 
@@ -845,15 +862,59 @@ def main():
     overlay_meta = {}
     overlays = [o.strip().lower() for o in (args.overlay or '').split(',') if o.strip()]
 
-    def _us_key(c): return c.get('state','').upper().strip()[:2] if c.get('country','').lower() in ('united states','us','usa') else ''
-
-    # Pre-build the set of known US/CA postal codes for fast lookup
+    # Pre-build separate sets of US state codes and Canadian province codes.
+    # _POSTAL_STATE maps 2-letter postal codes -> full names for both countries.
+    # GPX state fields may be either the 2-letter code (GSAK exports, Canada)
+    # or the full name (geocaching.com exports, US).  We build a reverse lookup
+    # (lowercased full name -> postal code) to handle both forms.
+    _CA_PROVINCE_CODES = {
+        'AB','BC','MB','NB','NL','NS','NT','NU','ON','PE','QC','SK','YT',
+    }
     try:
         from gsak_counties import _POSTAL_STATE as _ps, lookup_county as _lookup_county
-        _us_ca_codes: set = set(_ps.keys())
+        _us_codes: set = set(_ps.keys()) - _CA_PROVINCE_CODES
+        _ca_codes: set = set(_ps.keys()) & _CA_PROVINCE_CODES
+        # Reverse map: lowercase full name -> 2-letter code (covers both US and CA)
+        _name_to_code: dict = {name.lower(): code for code, name in _ps.items()}
     except ImportError:
-        _us_ca_codes = set()
+        _us_codes = set()
+        _ca_codes = _CA_PROVINCE_CODES
+        _name_to_code = {}
         _lookup_county = None
+
+    # Combined set used in _cnty_key to detect "use the US/CA DB branch"
+    _us_ca_codes: set = _us_codes | _ca_codes
+
+    _US_COUNTRY = ('united states', 'us', 'usa')
+    _CA_COUNTRY = ('canada', 'ca')
+
+    def _resolve_postal(state_field: str) -> str:
+        """
+        Return the 2-letter postal code for a state/province field that may be
+        either already a code ('PA', 'BC') or a full name ('Pennsylvania').
+        Returns '' if unresolvable.
+        """
+        s = state_field.strip()
+        if not s:
+            return ''
+        up = s.upper()
+        if up in _us_ca_codes:          # already a 2-letter code
+            return up
+        return _name_to_code.get(s.lower(), '')   # full-name lookup
+
+    def _us_key(c):
+        """Return 2-letter state code for US caches; '' otherwise."""
+        if c.get('country', '').lower() not in _US_COUNTRY:
+            return ''
+        code = _resolve_postal(c.get('state', ''))
+        return code if code in _us_codes else ''
+
+    def _ca_key(c):
+        """Return 2-letter province code for Canadian caches; '' otherwise."""
+        if c.get('country', '').lower() not in _CA_COUNTRY:
+            return ''
+        code = _resolve_postal(c.get('state', ''))
+        return code if code in _ca_codes else ''
 
     # Coordinate → (state, county) lookup cache — avoids redundant DB hits
     # for multiple caches in the same county
@@ -872,10 +933,15 @@ def main():
                 '', s, flags=_re.IGNORECASE,
             ).strip()
 
-        if state in _us_ca_codes:
-            # US or CA: state field IS the 2-letter postal code
+        # Resolve state field to a 2-letter postal code.  GPX exports from
+        # geocaching.com use full names ('Pennsylvania'); GSAK exports and all
+        # Canadian records use the code directly ('PA', 'BC').
+        postal = _resolve_postal(state)
+
+        if postal in _us_ca_codes:
+            # US or CA: use the resolved 2-letter postal code as the key prefix
             if county:
-                return f"{state},{_clean_county(county)}"
+                return f"{postal},{_clean_county(county)}"
             # No county in GPX — do a coordinate-based DB lookup
             if _lookup_county is None or not db_path:
                 return ''
@@ -883,7 +949,7 @@ def main():
             cache_key = (round(lat, 5), round(lon, 5))
             if cache_key not in _coord_county_cache:
                 sc, cn = _lookup_county(lat, lon, db_path=db_path,
-                                        state_hint=state)
+                                        state_hint=postal)
                 _coord_county_cache[cache_key] = (sc, cn)
             sc, cn = _coord_county_cache[cache_key]
             if sc and cn:
@@ -900,7 +966,7 @@ def main():
 
         if county:
             # GSAK populated the county field (e.g. CZ district name) — prefer it.
-            # Strip accents to match DB filenames (Hlavní → Hlavni, etc.)
+            # Strip accents to match DB filenames (Hlavni mesto → Hlavni, etc.)
             return f"{iso},{_strip_accents(_clean_county(county))}"
 
         # No county field: try state field as region name first (works for flat
@@ -909,12 +975,9 @@ def main():
             return ''
         key_from_state = f"{iso},{_strip_accents(state)}"
 
-        # For countries like CZ where the GPX state is a *region* (Ústecký kraj)
+        # For countries like CZ where the GPX state is a *region* (Ustecky kraj)
         # but the DB has *districts* (Decin, Litomerice, ...), the state-derived
         # key won't match. Fall back to a coordinate lookup in that case.
-        # We always try the state key first via the overlay's status dict; if it
-        # misses there, the coordinate lookup will find the right district row.
-        # We pre-populate the cache here so build_counties_overlay sees a hit.
         if _lookup_county is not None and db_path:
             lat, lon = c.get('lat', 0.0), c.get('lon', 0.0)
             coord_key = (round(lat, 5), round(lon, 5))
@@ -940,7 +1003,8 @@ def main():
 
     if 'states' in overlays:
         print("Building states overlay ...")
-        result = build_states_overlay(m, filtered, us_key_fn=_us_key)
+        result = build_states_overlay(m, filtered, us_key_fn=_us_key,
+                                      ca_key_fn=_ca_key)
         if result:
             overlay_meta['states'] = result
     if 'counties' in overlays:
