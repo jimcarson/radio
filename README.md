@@ -10,7 +10,7 @@ Logging QSLs accurately is [surprisingly complicated](https://wt8p.com/logging-a
 
    POTA/SOTA folks — see where you activated with a helpful flag on the map.
 
-   ![Mobile activations](TF_Contacts.jpg "POTA Activations")
+   ![Mobile activations](MULTI_QTH.jpg "Example of operating from multiple locations")
 
    Dealing with logging discrepancies is a lot easier if you can see them on a map. Plot your log on an interactive browser map, with overlays for worked/confirmed states, counties, and grid squares. Originally written to visualize a two-week Iceland POTA trip.
 
