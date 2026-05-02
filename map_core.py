@@ -18,7 +18,7 @@ Dependencies:
 
 from pathlib import Path
 
-__version__ = "1.4.4"  # overlays_only: ghost cells for grids/states/counties; land_grids.txt filter for grid ghosts
+__version__ = "1.4.5"  # map.cfg optional tile keys (Thunderforest, Stadia); OSM added; NatGeo default; verbose tile summary
 
 try:
     import yaml
@@ -191,31 +191,145 @@ def load_theme(theme_path=None, script_dir: Path = None) -> None:
 # Base map construction
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Optional tile provider config  (map.cfg beside this script)
+# ---------------------------------------------------------------------------
+
+_MAP_CFG_PATH = Path(__file__).parent / "map.cfg"
+_map_cfg_cache: dict | None = None
+
+
+def _load_map_cfg() -> dict:
+    """
+    Load map.cfg into a {provider_name: api_key} dict on first call; cache result.
+    Format: one entry per line —  provider : apikey  — '#' lines ignored.
+    Returns empty dict if file is absent (normal — no warning).
+    """
+    global _map_cfg_cache
+    if _map_cfg_cache is not None:
+        return _map_cfg_cache
+
+    cfg: dict = {}
+    if _MAP_CFG_PATH.exists():
+        for line in _MAP_CFG_PATH.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if ":" in line:
+                key, _, val = line.partition(":")
+                k, v = key.strip().lower(), val.strip()
+                if k and v:
+                    cfg[k] = v
+    _map_cfg_cache = cfg
+    return cfg
+
+
+# ---------------------------------------------------------------------------
+# Base map construction
+# ---------------------------------------------------------------------------
+
+# Thunderforest tile styles (all use the same API key)
+_THUNDERFOREST_STYLES = [
+    ("outdoors",     "Thunderforest Outdoors"),
+    ("landscape",    "Thunderforest Landscape"),
+    ("cycle",        "Thunderforest Cycle"),
+]
+
+# Stadia tile styles (all use the same API key)
+_STADIA_STYLES = [
+    ("alidade_smooth",      "Stadia Smooth"),
+    ("alidade_smooth_dark", "Stadia Smooth Dark"),
+    ("stamen_toner",        "Stadia Toner"),
+    ("stamen_terrain",      "Stadia Terrain"),
+]
+
+
 def build_base_map(center_lat: float, center_lon: float,
-                   zoom_start: int = 3) -> folium.Map:
+                   zoom_start: int = 3,
+                   verbose: bool = False) -> folium.Map:
     """
     Create a folium Map with all standard tile layers and no initial tile.
     Applies MAP_LON_OFFSET to the initial center longitude.
+
+    Always-available layers (no key required):
+        CartoDB Light, CartoDB Dark, Esri Topo, Esri Satellite,
+        Esri NatGeo (default — added last)
+
+    Optional layers loaded from map.cfg if API keys are present:
+        thunderforest : <key>  -> Thunderforest Outdoors / Landscape / Cycle
+        stadia        : <key>  -> Stadia Smooth / Dark / Toner / Terrain
+
+    If verbose=True, prints a summary of loaded tile layers.
     """
     m = folium.Map(
         location=(center_lat, center_lon + MAP_LON_OFFSET),
         zoom_start=zoom_start,
         tiles=None,
     )
+
+    cfg = _load_map_cfg()
+    added: list[str] = []
+
+    # ── Always-available layers ────────────────────────────────────────────
     folium.TileLayer("CartoDB positron",    name="CartoDB Light").add_to(m)
     folium.TileLayer("CartoDB dark_matter", name="CartoDB Dark").add_to(m)
+    added += ["CartoDB Light", "CartoDB Dark"]
+
     folium.TileLayer(
         tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}",
         attr="Esri", name="Esri Topo",
     ).add_to(m)
     folium.TileLayer(
-        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/NatGeo_World_Map/MapServer/tile/{z}/{y}/{x}",
-        attr="Esri / National Geographic", name="Esri NatGeo",
-    ).add_to(m)
-    folium.TileLayer(
         tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
         attr="Esri", name="Esri Satellite",
     ).add_to(m)
+    added += ["Esri Topo", "Esri Satellite"]
+
+    # ── Optional: Thunderforest ────────────────────────────────────────────
+    tf_key = cfg.get("thunderforest", "")
+    if tf_key:
+        tf_added = []
+        for style, label in _THUNDERFOREST_STYLES:
+            folium.TileLayer(
+                tiles=(f"https://tile.thunderforest.com/{style}/{{z}}/{{x}}/{{y}}.png"
+                       f"?apikey={tf_key}"),
+                attr='&copy; <a href="https://www.thunderforest.com/">Thunderforest</a>,'
+                     ' &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+                name=label,
+            ).add_to(m)
+            tf_added.append(label)
+        added += tf_added
+
+    # ── Optional: Stadia ───────────────────────────────────────────────────
+    stadia_key = cfg.get("stadia", "")
+    if stadia_key:
+        st_added = []
+        for style, label in _STADIA_STYLES:
+            folium.TileLayer(
+                tiles=(f"https://tiles.stadiamaps.com/tiles/{style}/{{z}}/{{x}}/{{y}}.png"
+                       f"?api_key={stadia_key}"),
+                attr='&copy; <a href="https://stadiamaps.com/">Stadia Maps</a>,'
+                     ' &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+                name=label,
+            ).add_to(m)
+            st_added.append(label)
+        added += st_added
+
+    # ── Esri NatGeo — added last so it is the default visible layer ────────
+    folium.TileLayer(
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/NatGeo_World_Map/MapServer/tile/{z}/{y}/{x}",
+        attr="Esri / National Geographic", name="Esri NatGeo",
+    ).add_to(m)
+    added.append("Esri NatGeo")
+
+    if verbose:
+        always_n   = 5  # CartoDB×2, Esri Topo, Esri Satellite, NatGeo
+        optional_n = len(added) - always_n
+        opt_note   = (f" + {optional_n} from map.cfg"
+                      f" ({', '.join(a for a in added[always_n:])})"
+                      if optional_n else " (no map.cfg optional layers)")
+        print(f"  Tile layers: {always_n} standard{opt_note}")
+
     return m
 
 

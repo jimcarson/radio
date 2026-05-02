@@ -34,7 +34,7 @@ Options:
     --output FILE           Output HTML filename (default: map_output.html next to input file)
 """
 
-__version__ = "1.2.4"  # Fix is_confirmed: add QSL_RCVD check for LoTW export compatibility
+__version__ = "1.2.5"  # pass verbose to build_base_map for tile layer summary
 
 import argparse
 import sys
@@ -324,10 +324,10 @@ def _select_arcs(records: list, arc_max: int = 1000,
 
 def build_map(my_coords, records, show_arcs: bool,
               arc_max: int = 1000, arc_cell_max: int = 2,
-              overlays_only: bool = False):
+              overlays_only: bool = False, verbose: bool = False):
     from folium.plugins import MarkerCluster
 
-    m = build_base_map(my_coords[0], my_coords[1])
+    m = build_base_map(my_coords[0], my_coords[1], verbose=verbose)
 
     # Operating location markers — one per unique MY_ position
     seen_origins = {}   # coords -> info dict for dedup
@@ -1067,7 +1067,8 @@ def main():
                                        show_arcs=args.show_arcs,
                                        arc_max=args.arc_max,
                                        arc_cell_max=args.arc_cell_max,
-                                       overlays_only=args.overlays_only)
+                                       overlays_only=args.overlays_only,
+                                       verbose=args.verbose)
     # Collect band groups that were actually used (for legend)
     used_bands = {r.get('BAND', 'unknown').lower() for r in filtered if resolve_coords(r)}
     add_legend(m, {b: None for b in used_bands}, hidden=args.show_filters)

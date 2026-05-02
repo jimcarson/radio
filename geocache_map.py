@@ -30,7 +30,7 @@ Options:
     --verbose           Show cache type breakdown and skipped count
 """
 
-__version__ = "1.3.2"  # replace local _CA_PROVINCE_CODES with CA_CODES from location_mapping; import _POSTAL_STATE from location_mapping instead of gsak_counties
+__version__ = "1.3.3"  # pass verbose to build_base_map for tile layer summary
 
 import argparse
 import sys
@@ -463,7 +463,8 @@ def apply_filters(caches: list, args) -> list:
 # ---------------------------------------------------------------------------
 
 def build_map(center: tuple, caches: list,
-              m: folium.Map = None) -> tuple[folium.Map, int]:
+              m: folium.Map = None,
+              verbose: bool = False) -> tuple[folium.Map, int]:
     """
     Build the geocache map. Returns (map, plotted_count).
     Caches are grouped by type into FeatureGroups with MarkerCluster.
@@ -475,7 +476,7 @@ def build_map(center: tuple, caches: list,
     from folium.plugins import MarkerCluster
 
     if m is None:
-        m = build_base_map(center[0], center[1], zoom_start=7)
+        m = build_base_map(center[0], center[1], zoom_start=7, verbose=verbose)
 
     cluster_icon_fn = """
         function(cluster) {
@@ -882,7 +883,8 @@ def main():
     # Create base map first so overlays can be added before cache dot layers.
     # Leaflet renders FeatureGroups in insertion order — overlays added here
     # will sit beneath the cache markers added by build_map() below.
-    m = map_core.build_base_map(center[0], center[1], zoom_start=7)
+    m = map_core.build_base_map(center[0], center[1], zoom_start=7,
+                                verbose=args.verbose)
 
     # Overlays (reuse map_core builders; key functions work on geocache dicts)
     overlay_meta = {}
@@ -1038,7 +1040,7 @@ def main():
         add_overlay_legend(m, [o for o in overlays if o in ('states','counties','grids')])
 
     # Add cache dots on top of all overlays
-    m, plotted = build_map(center, filtered, m=m)
+    m, plotted = build_map(center, filtered, m=m, verbose=args.verbose)
 
     # Get type_fgs for the filter panel
     types_present = {c['type'] for c in filtered}
