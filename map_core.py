@@ -18,7 +18,7 @@ Dependencies:
 
 from pathlib import Path
 
-__version__ = "1.4.2"  # fix Canadian county routing: _is_us_ca() now uses US-only codes so CA province keys go to DB path instead of being silently dropped by GeoJSON path
+__version__ = "1.4.3"  # fix Canadian county routing (_is_us_ca uses US-only codes); add cache_types to THEME_DEFAULTS/load_theme(); expose CACHE_TYPE_COLORS global
 
 try:
     import yaml
@@ -91,16 +91,33 @@ THEME_DEFAULTS: dict = {
             "fill_opacity": 0.45,
         },
     },
+    "cache_types": {
+        "default_cache_color":      "#888888",
+        "Traditional Cache":        "#2ecc71",
+        "Mystery Cache":            "#3498db",
+        "Unknown Cache":            "#3498db",
+        "Multi-cache":              "#e67e22",
+        "Earthcache":               "#8B4513",
+        "Virtual Cache":            "#9b59b6",
+        "Letterbox Hybrid":         "#1abc9c",
+        "Wherigo Cache":            "#16a085",
+        "Cache In Trash Out Event": "#f39c12",
+        "Mega-Event Cache":         "#e74c3c",
+        "Giga-Event Cache":         "#c0392b",
+        "Event Cache":              "#e74c3c",
+    },
 }
 
 # Module-level theme state — populated by load_theme()
-BAND_COLORS:     dict  = {}
-DEFAULT_COLOR:   str   = "#888888"
-STATES_COLORS:   dict  = {}
-COUNTIES_COLORS: dict  = {}
-GRIDS_COLORS:    dict  = {}
-MAP_LON_OFFSET:  float = 0.0
-CONTACT_DOT:     dict  = {}
+BAND_COLORS:       dict  = {}
+DEFAULT_COLOR:     str   = "#888888"
+STATES_COLORS:     dict  = {}
+COUNTIES_COLORS:   dict  = {}
+GRIDS_COLORS:      dict  = {}
+MAP_LON_OFFSET:    float = 0.0
+CONTACT_DOT:       dict  = {}
+CACHE_TYPE_COLORS:    dict  = {}   # geocache_map.py: {type_name -> hex color}
+DEFAULT_CACHE_COLOR:  str   = "#888888"  # fallback for unknown cache types
 
 
 def load_theme(theme_path=None, script_dir: Path = None) -> None:
@@ -112,7 +129,8 @@ def load_theme(theme_path=None, script_dir: Path = None) -> None:
     script_dir  : directory to look in for theme_default.yaml (defaults to CWD)
     """
     global BAND_COLORS, DEFAULT_COLOR, STATES_COLORS, COUNTIES_COLORS
-    global GRIDS_COLORS, MAP_LON_OFFSET, CONTACT_DOT
+    global GRIDS_COLORS, MAP_LON_OFFSET, CONTACT_DOT, CACHE_TYPE_COLORS
+    global DEFAULT_CACHE_COLOR
 
     theme = copy.deepcopy(THEME_DEFAULTS)
 
@@ -145,6 +163,8 @@ def load_theme(theme_path=None, script_dir: Path = None) -> None:
                                 theme["overlay"][key].update(vals)
                             else:
                                 theme["overlay"][key] = vals
+                    if "cache_types" in loaded:
+                        theme["cache_types"].update(loaded["cache_types"])
                 print(f"  Theme loaded: {theme_path.name}")
             except Exception as exc:
                 print(f"  Warning: could not load theme {theme_path}: {exc}")
@@ -158,6 +178,10 @@ def load_theme(theme_path=None, script_dir: Path = None) -> None:
     GRIDS_COLORS    = theme["overlay"]["grids"]
     MAP_LON_OFFSET  = float(theme.get("map_center_lon_offset", 0))
     CONTACT_DOT     = theme["contact_dot"]
+    # Cache type colors: everything in cache_types except the default key
+    _ct = theme["cache_types"]
+    CACHE_TYPE_COLORS = {k: v for k, v in _ct.items() if k != "default_cache_color"}
+    DEFAULT_CACHE_COLOR = _ct.get("default_cache_color", "#888888")
 
 
 # ---------------------------------------------------------------------------
@@ -705,25 +729,27 @@ def build_counties_overlay(m: folium.Map, records: list,
                      up in the DB counties table and merged into one layer.
                      If None, only US/CA GeoJSON keys are rendered.
     """
-    # US state/territory postal codes — the only keys that belong in us_counties.geojson.
-    # Canadian province codes (BC, QC, ON …) intentionally excluded: their county
-    # polygons live in gsak_counties.db, not in the GeoJSON file.
-    _US_ONLY_CODES: set[str] = {
-        'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA',
-        'HI','ID','IL','IN','IA','KS','KY','LA','ME','MD',
-        'MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ',
-        'NM','NY','NC','ND','OH','OK','OR','PA','RI','SC',
-        'SD','TN','TX','UT','VT','VA','WA','WV','WI','WY',
-        'DC','AS','GU','MP','PR','VI',   # territories
-    }
+    # US-only postal codes — Canadian province codes are intentionally absent
+    # so they route to the DB path along with other international regions.
+    try:
+        from location_mapping import US_CODES as _US_CODES
+    except ImportError:
+        # Fallback: hardcoded set if location_mapping is unavailable
+        _US_CODES = frozenset({
+            'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA',
+            'HI','ID','IL','IN','IA','KS','KY','LA','ME','MD',
+            'MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ',
+            'NM','NY','NC','ND','OH','OK','OR','PA','RI','SC',
+            'SD','TN','TX','UT','VT','VA','WA','WV','WI','WY',
+            'DC','AS','GU','MP','PR','VI',
+        })
 
     def _is_us_ca(adif_key: str) -> bool:
         """Return True only for US state/territory keys (GeoJSON path).
-        Canadian province codes are intentionally excluded so they are
-        routed to the DB path alongside other international regions.
+        Canadian province codes are excluded — their polygons live in the DB.
         """
         code = adif_key.split(',', 1)[0] if ',' in adif_key else ''
-        return code in _US_ONLY_CODES
+        return code in _US_CODES
 
     # -----------------------------------------------------------------------
     # US / CA path — load GeoJSON

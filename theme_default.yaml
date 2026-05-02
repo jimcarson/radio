@@ -80,3 +80,24 @@ overlay:
     confirmed:        "#27ae9e"   # teal-green (distinct from state/county greens)
     worked:           "#e8a020"   # amber (consistent with worked language)
     fill_opacity:     0.45        # fill opacity for worked/confirmed grids
+
+# ---------------------------------------------------------------------------
+# Geocache dot colors by cache type  (geocache_map.py only)
+# Keys must match the canonical Groundspeak type names exactly.
+# Unknown Cache is an alias for Mystery Cache and should share its color.
+# The default_cache_color is used for any type not listed here.
+# ---------------------------------------------------------------------------
+cache_types:
+  default_cache_color:       "#888888"
+  Traditional Cache:         "#2ecc71"   # green
+  Mystery Cache:             "#3498db"   # blue
+  Unknown Cache:             "#3498db"   # blue (alias for Mystery)
+  Multi-cache:               "#e67e22"   # orange
+  Earthcache:                "#8B4513"   # saddle brown
+  Virtual Cache:             "#9b59b6"   # purple
+  Letterbox Hybrid:          "#1abc9c"   # teal
+  Wherigo Cache:             "#16a085"   # dark teal
+  Cache In Trash Out Event:  "#f39c12"   # amber
+  Mega-Event Cache:          "#e74c3c"   # red
+  Giga-Event Cache:          "#c0392b"   # dark red
+  Event Cache:               "#e74c3c"   # red

@@ -30,7 +30,7 @@ Options:
     --verbose           Show cache type breakdown and skipped count
 """
 
-__version__ = "1.3.0"  # split _us/_ca codes, _ca_key for provinces; tooltip fix moved to map_core
+__version__ = "1.3.1"  # CACHE_TYPE_COLORS colors moved to theme_default.yaml; labels stay in _CACHE_TYPE_LABELS; rebuilt at runtime by _build_cache_type_colors()
 
 import argparse
 import sys
@@ -177,22 +177,47 @@ _NS_GS_ALT = 'http://www.groundspeak.com/cache/1/0/2'
 # Cache type configuration
 # ---------------------------------------------------------------------------
 
-# Display name -> (dot color, short label for filter panel)
-CACHE_TYPE_COLORS: dict = {
-    'Traditional Cache': ('#2ecc71', 'Traditional'),
-    'Mystery Cache':     ('#3498db', 'Mystery'),
-    'Unknown Cache':     ('#3498db', 'Mystery'),      # alias
-    'Multi-cache':       ('#e67e22', 'Multi'),
-    'Earthcache':        ('#8B4513', 'Earth'),
-    'Virtual Cache':     ('#9b59b6', 'Virtual'),
-    'Letterbox Hybrid':  ('#1abc9c', 'Letterbox'),
-    'Wherigo Cache':     ('#16a085', 'Wherigo'),
-    'Cache In Trash Out Event': ('#f39c12', 'CITO'),
-    'Mega-Event Cache':  ('#e74c3c', 'Mega'),
-    'Giga-Event Cache':  ('#c0392b', 'Giga'),
-    'Event Cache':       ('#e74c3c', 'Event'),
+# ---------------------------------------------------------------------------
+# Cache type configuration
+# ---------------------------------------------------------------------------
+
+# Short labels used in the filter panel and layer control.
+# Colors are loaded from theme_default.yaml (cache_types section) via
+# map_core.load_theme() and merged below into CACHE_TYPE_COLORS after
+# theme load.  Edit theme_default.yaml to change dot colors.
+_CACHE_TYPE_LABELS: dict = {
+    'Traditional Cache':        'Traditional',
+    'Mystery Cache':            'Mystery',
+    'Unknown Cache':            'Mystery',      # alias — shares Mystery color
+    'Multi-cache':              'Multi',
+    'Earthcache':               'Earth',
+    'Virtual Cache':            'Virtual',
+    'Letterbox Hybrid':         'Letterbox',
+    'Wherigo Cache':            'Wherigo',
+    'Cache In Trash Out Event': 'CITO',
+    'Mega-Event Cache':         'Mega',
+    'Giga-Event Cache':         'Giga',
+    'Event Cache':              'Event',
 }
-_DEFAULT_CACHE_COLOR = '#888888'
+
+# Populated by _build_cache_type_colors() after load_theme() is called.
+# Structure: {canonical_type_name: (hex_color, short_label)}
+CACHE_TYPE_COLORS:    dict = {}
+_DEFAULT_CACHE_COLOR: str  = '#888888'
+
+
+def _build_cache_type_colors() -> None:
+    """
+    Merge theme colors (map_core.CACHE_TYPE_COLORS) with local labels
+    (_CACHE_TYPE_LABELS) to build the runtime CACHE_TYPE_COLORS dict.
+    Called once after load_theme().
+    """
+    global CACHE_TYPE_COLORS, _DEFAULT_CACHE_COLOR
+    _DEFAULT_CACHE_COLOR = map_core.DEFAULT_CACHE_COLOR
+    CACHE_TYPE_COLORS = {
+        ctype: (map_core.CACHE_TYPE_COLORS.get(ctype, _DEFAULT_CACHE_COLOR), label)
+        for ctype, label in _CACHE_TYPE_LABELS.items()
+    }
 
 # Canonical prefix map for --type matching (lowercase prefix -> canonical name)
 _TYPE_PREFIX_MAP: dict = {
@@ -822,6 +847,7 @@ def main():
         sys.exit(f"File not found: {gpx_path}")
 
     load_theme(args.theme, script_dir=Path(__file__).parent)
+    _build_cache_type_colors()   # merge theme colors with local labels
 
     # Resolve DB path early so we can report its status before building
     db_path = resolve_db_path(getattr(args, 'db', None))

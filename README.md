@@ -57,7 +57,8 @@ Obligatory disclaimer:
 | `sample_corrections.csv` | Annotated sample CSV covering all supported `field` keywords — copy and edit for your own use |
 | `requirements.txt` | Pinned dependency list — `pip install -r requirements.txt` |
 | `sample.cfg` | Sample per-field rules configuration file for `reconcile_adif.py` — copy to `<CALLSIGN>.cfg` and edit |
-| `theme_default.yaml` | Default color theme for `adif_map.py` — copy to customize band/overlay colors and map centering |
+| `theme_default.yaml` | Default color theme for `adif_map.py` and `geocache_map.py` — copy to customize band/overlay/cache-type colors and map centering |
+| `location_mapping.py` | ISO 3166-1 country name ↔ code mappings, US state and Canadian province name ↔ postal code mappings. Required by `gsak_counties.py` and `map_core.py`. Not run directly. |
 | `ne_states.geojson` | US + Canada state/province boundaries (Natural Earth, public domain). Used for state/province choropleth and border lines. |
 | `us_counties.geojson` | US county boundaries — generated from GSAK polygon data via `gsak_build_geojson.py`. Regenerate after updating `gsak_counties.db`. |
 | `gsak_counties.db` | SQLite database of US county + Canadian regional polygons built from GSAK boundary files. Used for point-in-polygon county lookup in `geocache_map.py`. |

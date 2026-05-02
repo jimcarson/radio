@@ -455,7 +455,7 @@ The `--overlay` flag adds choropleth layers showing worked/confirmed status. Eac
 |---|---|---|---|
 | States / Provinces | Green `#2ecc71` | Amber `#f39c12` | Outline only |
 | Counties | Dark green `#1a8a4a` | Burnt amber `#c0720a` | Outline only |
-| Grid squares | Orange `#e67e22` | Yellow `#f7dc6f` | Not drawn |
+| Grid squares | Teal `#27ae9e` | Amber `#e8a020` | Not drawn |
 
 All colors are configurable in `theme_default.yaml`. All three overlay layers are independently toggleable in the layer control.
 
@@ -463,7 +463,11 @@ All colors are configurable in `theme_default.yaml`. All three overlay layers ar
 
 **States and provinces** (US + Canada) — read from `ne_states.geojson`. Uses the `STATE` field and `DXCC` code.
 
-**Counties** (US only) — read from `us_counties.geojson` (generated from GSAK community polygon data via `gsak_build_geojson.py`). Uses the `CNTY` field (e.g. `WA,King`). County/Parish/Borough suffixes are stripped automatically before matching. LoTW exports county names in ALL CAPS — these are normalised to title case automatically. Known spelling differences between LoTW and GSAK (e.g. "De Kalb" vs "DeKalb") are also resolved transparently.
+**Counties** — uses three data sources depending on geography:
+
+- **US counties** — read from `us_counties.geojson` (generated from GSAK community polygon data via `gsak_build_geojson.py`). Uses the `CNTY` field (e.g. `WA,King`). County/Parish/Borough suffixes are stripped automatically before matching. LoTW exports county names in ALL CAPS — these are normalised to title case automatically. Known spelling differences between LoTW and GSAK (e.g. "De Kalb" vs "DeKalb") are also resolved transparently.
+- **Canadian regional districts** — read from `gsak_counties.db`. Pass `--db gsak_counties.db` to enable. Build the DB with `python gsak_counties.py build --country CA`.
+- **International regions** (Norway, Iceland, Czechia, Faroe Islands, etc.) — also read from `gsak_counties.db`. Build with `python gsak_counties.py build --country <code>`. All three sources are merged into a single choropleth layer.
 
 ### Interactive Filter Panel (`--show-filters`)
 
@@ -549,10 +553,12 @@ python geocache_map.py caches.gpx --type earth,traditional --difficulty 1-3
 --found                 Show only found caches
 --not-found             Show only unfound caches
 --overlay <LIST>        Comma-separated overlays: states, counties
-                        (requires ne_states.geojson / us_counties.geojson)
+                        (US: requires ne_states.geojson / us_counties.geojson;
+                         Canadian and international counties: requires gsak_counties.db)
 --show-filters          Show collapsible type/D/T filter panel (top-left)
---gsak-db <FILE>        GSAK county polygon DB for coordinate→county lookup
-                        (default: gsak_counties.db beside the script)
+--db <FILE>             Path to gsak_counties.db for coordinate→county lookup and
+                        international county overlays
+                        (default: gsak_counties.db beside the script or in CWD)
 --theme <FILE>          Color theme YAML (default: theme_default.yaml)
 --output <FILE>         Output HTML path (default: map_output.html beside GPX)
 --verbose               Show cache type breakdown
@@ -571,16 +577,31 @@ python geocache_map.py caches.gpx --type earth,traditional --difficulty 1-3
 | Wherigo | Teal (darker) |
 | CITO / Event / Mega / Giga | Red/amber variants |
 
-All colors are controlled by `CACHE_TYPE_COLORS` in `geocache_map.py` — edit directly to customise.
+All colors are configured in the `cache_types` section of `theme_default.yaml`. Copy and edit it, then pass `--theme mytheme.yaml` to use a custom palette.
 
 ### County Assignment
 
-GSAK GPX exports rarely include county data. When `gsak_counties.db` is present alongside the script, `geocache_map.py` automatically looks up the county for each cache that has no county field, using point-in-polygon matching against the GSAK boundary polygons. This enables the `--overlay counties` choropleth to show found/unfound counts per county.
+County data is sourced from two places:
 
-Build the DB once:
+**GPX field** — GSAK can populate a `<gsak:County>` field in the export. When present, this is used directly. PEI and Ontario, for example, often have county data embedded.
+
+**Coordinate lookup** — When no county field is present (common for Quebec and most Canadian exports), `geocache_map.py` automatically resolves the county by point-in-polygon lookup against `gsak_counties.db`. This requires the DB to be present. Results are memoized per coordinate, so a dense cluster of caches in the same county only costs one DB hit.
+
+Both paths produce keys in `STATE,Name` format (e.g. `BC,Greater Vancouver`, `QC,Communauté-Métropolitaine-de-Montréal`) that are matched against the DB for choropleth rendering.
+
+**Supported geographies** for the `--overlay counties` choropleth:
+
+| Geography | Data source | Build command |
+|---|---|---|
+| US counties | `us_counties.geojson` | `gsak_build_geojson.py` |
+| Canadian regional districts | `gsak_counties.db` | `gsak_counties.py build --country CA` |
+| International regions (NO, IS, CZ, FO, FR, …) | `gsak_counties.db` | `gsak_counties.py build --country <code>` |
+
+Build the DB once per country:
 ```bash
 python gsak_counties.py build --gsak-dir gsak --country US --verbose
 python gsak_counties.py build --gsak-dir gsak --country CA --verbose
+python gsak_counties.py build --gsak-dir gsak --country IS --verbose
 ```
 
 ### Filter Panel (`--show-filters`)
@@ -710,6 +731,85 @@ Simplification uses the Ramer-Douglas-Peucker algorithm. At county zoom levels, 
 
 The generated file uses the same property schema as the previous Census-derived file (`adif_key`, `namelsad`, `state`, `name`) — it is a drop-in replacement with no changes required to `map_core.py` or `adif_map.py`.
 
+
+---
+
+## Debugging and Diagnostics
+
+### Console output
+
+Both `adif_map.py` and `geocache_map.py` print a progress summary to the console. When an overlay produces fewer results than expected, this output is the first place to look:
+
+```
+  Theme loaded: theme_default.yaml
+  Parsing contacts.adi ...
+    2847 QSO records found.
+  Station location: 47.6162, -122.1580
+  2847 QSOs after filtering.
+  Modes: FT8 (1203), CW (844), SSB (620), ...
+  Building map ...
+  Building county overlay ...
+  County overlay: 312 confirmed, 48 worked-only (7 international region(s) from DB).
+  Map saved → map_output.html
+  Plotted 2847 contacts.
+```
+
+Key lines to check:
+
+- **`Theme loaded`** — confirms the theme file was found. If absent, built-in defaults are used silently.
+- **`N QSOs after filtering`** — if this is much lower than the total, check your `--band`, `--mode`, or `--date-from`/`--date-to` arguments.
+- **`County overlay: N confirmed, M worked-only (K international region(s) from DB)`** — if `K` is 0 when you expect international counties, the DB wasn't found or the country hasn't been built into it yet.
+- **`County overlay: N international region(s) skipped (no --db path provided)`** — you need to pass `--db gsak_counties.db`.
+
+### Verifying the county database
+
+```bash
+# Show all countries and region counts in the DB
+python gsak_counties.py stats --db gsak_counties.db
+
+# Confirm a specific coordinate resolves correctly
+python gsak_counties.py lookup 49.25 -123.10 --db gsak_counties.db
+# Expected: BC, Greater Vancouver
+
+python gsak_counties.py lookup 45.50 -73.59 --db gsak_counties.db
+# Expected: QC, <regional county name>
+```
+
+If `lookup` returns nothing for a coordinate that should be in a built country, the polygon file for that region may be missing from the `gsak/` directory or wasn't included in the `build` run. Re-run with `--verbose` to see skip warnings.
+
+### QSOs missing from the map (`adif_map.py`)
+
+If plotted contacts are fewer than QSOs after filtering, the console will report:
+
+```
+  Note: 143 QSO(s) skipped — no usable coordinates found.
+```
+
+`adif_map.py` resolves contact coordinates in this order: `LAT`/`LON` fields → `GRIDSQUARE` field. If neither is present the QSO is silently skipped. Common causes:
+
+- **QRZ exports** — coordinates are usually present. If missing, re-export from QRZ with coordinate fields enabled.
+- **LoTW exports** — LoTW does not export `LAT`/`LON`. `GRIDSQUARE` is usually present if the other party entered a grid. If it's missing, there's no remedy from this side.
+- **FT8/digital contacts** — grid squares are normally exchanged as part of the protocol and will be present. Missing grids here usually indicate a logging error.
+
+Add `--verbose` to see your operating location(s) resolved from `MY_LAT`/`MY_LON` or `MY_GRIDSQUARE`. If your own station location can't be resolved, the map will abort with an error — check that your ADIF header or records contain `MY_GRIDSQUARE`.
+
+### Counties not coloring on the map
+
+Work through this checklist:
+
+1. **Is the DB found?** — `geocache_map.py` searches for `gsak_counties.db` in this order: the `--db` argument, beside the script, then the current working directory. If none is found it prints a warning and continues without DB features. Pass `--db gsak_counties.db` explicitly if auto-detection is failing — particularly if you're running the script from a different directory than where the DB lives.
+2. **Is the country built into the DB?** — Run `gsak_counties.py stats` and confirm the expected country code appears.
+3. **Does `lookup` work for a cache coordinate?** — If `lookup` returns nothing, the polygon for that region is missing. Re-run `build --verbose` for that country.
+4. **Does the GPX have a country field?** — `geocache_map.py` uses the `<groundspeak:country>` element to identify international caches. If this field is blank or mismatched, the coordinate lookup will still attempt to resolve it, but the country border overlay won't include it.
+5. **Is the adif_key format correct?** — County keys must match exactly what's in the DB. Run `sqlite3 gsak_counties.db "SELECT adif_key FROM counties WHERE state_code='BC' LIMIT 5"` to see the exact format. A key mismatch (e.g. accented vs. unaccented name) means the polygon exists in the DB but won't match. `geocache_map.py` strips accents from international county names before lookup — if you're building a custom tool, do the same.
+
+### ADIF county fields not matching
+
+If the `--overlay counties` layer shows fewer US counties than expected:
+
+- Run `adif_map.py` without `--confirmed` to see worked-but-unconfirmed counties too.
+- Check the raw `CNTY` field in your ADIF: QRZ and LoTW sometimes export as `WA,King County` (with suffix) — these are stripped automatically, but other unexpected formats may not be. Add `--verbose` and inspect the console.
+- LoTW exports county names in ALL CAPS (`WA,KING`). These are title-cased automatically. If you see zero county matches from a LoTW export, verify the `CNTY` field is present at all — some LoTW exports omit it.
 
 ---
 
