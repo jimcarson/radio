@@ -25,6 +25,7 @@ Options:
     --overlays-only         Hide contact dots; show only overlay choropleth.
                             Unworked cells render as ghost polygons (transparent
                             fill, visible border) so you can hover to identify them.
+                            Requires land_grids.txt (run build_land_grids.py once).
     --show-arcs             Show great-circle arc lines (default: off — slow on large logs)
     --show-filters          Show collapsible band/mode filter panel (top-left corner)
     --overlay LIST          Comma-separated overlays: grids, states, counties
@@ -974,7 +975,7 @@ def main():
     parser.add_argument("--include-null-grid", dest="include_null_grid", action="store_true",
                         help="Include JJ00 contacts (excluded by default — JJ00 is a placeholder for contacts with no location)")
     parser.add_argument("--overlays-only", dest="overlays_only", action="store_true",
-                        help="Hide contact dots; show overlay choropleth only. Unworked cells render as ghost polygons (border + transparent fill, hoverable).")
+                        help="Hide contact dots; show overlay choropleth only. Unworked cells rendered as ghost polygons (requires land_grids.txt — run build_land_grids.py once).")
     parser.add_argument("--show-arcs", dest="show_arcs", action="store_true",
                         help="Draw great-circle arc lines (default: off — slow on large logs)")
     parser.add_argument("--arc-max", dest="arc_max", type=int, default=1000,

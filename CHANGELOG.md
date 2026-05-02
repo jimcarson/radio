@@ -2,6 +2,12 @@
 
 ## 2026-05-02
 
+### New files
+
+**`build_land_grids.py`** (v1.0.0) — one-time setup script that generates `land_grids.txt`, a whitelist of Maidenhead grid4 squares that are within 2 grid-widths (~4°) of a land mass. Fetches the Natural Earth 110m land polygon GeoJSON (public domain), buffers it with `shapely`, and tests all 32,400 valid grid4 squares. Output is a plain-text file (one grid per line) read by `map_core.py` at runtime — `shapely` is not a runtime dependency. Accepts `--buffer N` (default 4.0°) and `--output FILE` arguments.
+
+**`land_grids.txt`** — generated output of `build_land_grids.py`. Static whitelist used to restrict ghost cell rendering in `--overlays-only` mode to land-adjacent grids only, eliminating open-ocean cells from the bounding-box enumeration and substantially reducing browser render time.
+
 ### `adif_map.py` (v1.2.3)
 
 **JJ00 null-grid exclusion**
@@ -16,14 +22,16 @@
 
 - New CLI flag `--overlays-only` hides all contact dots (MarkerCluster FeatureGroups) and arcs, leaving only the choropleth overlay(s) visible. Home station markers are preserved.
 - When active, unworked cells in all overlay types render as ghost polygons: transparent fill, visible border, fully hoverable — so you can identify needed grids/states/counties directly without inferring from neighbors.
+- Ghost grid cells are filtered through `land_grids.txt` (see `map_core.py`) so only land-adjacent cells appear. If `land_grids.txt` is missing, ghost cells are skipped with a warning directing you to run `build_land_grids.py`.
 - `band_groups` is still populated in overlays-only mode so the legend and `layer_meta` remain consistent.
-- Console output reflects the suppression.
+- Console output reflects the suppression and reports ghost cell count.
 
 ### `map_core.py` (v1.4.4)
 
 **Ghost cell rendering for `--overlays-only`**
 
-- `build_grid_overlay()` — new `overlays_only` parameter. When `True`, enumerates all valid Maidenhead grid4 squares within the bounding box of worked grids ± 1-cell padding (2° lon × 1° lat per cell) and adds unworked ones as ghost features styled with a visible border, zero fill opacity, and a tooltip showing just the grid designator (e.g. `DN82`). Ghost count reported in console output.
+- `build_grid_overlay()` — new `overlays_only` parameter. When `True`, enumerates all valid Maidenhead grid4 squares within the bounding box of worked grids ± 1-cell padding (2° lon × 1° lat per cell), filters candidates through `land_grids.txt`, and adds unworked land-adjacent ones as ghost features styled with a visible border, zero fill opacity, and a tooltip showing the grid designator (e.g. `DN82`). Ghost count reported in console output.
+- New `_load_land_grids()` — reads `land_grids.txt` into a `frozenset` on first call and caches it. If the file is absent, prints a warning once and returns `None`; ghost cells are then skipped entirely.
 - New `_all_grid4_in_bbox(lat_min, lat_max, lon_min, lon_max)` helper enumerates all valid grid4 squares whose SW corner falls within the given bounding box. Clamps to Maidenhead limits and snaps to grid-cell boundaries.
 - `build_states_overlay()` — new `overlays_only` parameter. When `True`, unworked states render with a faint fill (`fillOpacity: 0.10`) and their configured border, making them hoverable for identification.
 - `build_counties_overlay()` — new `overlays_only` parameter. When `True`, unworked counties render with zero fill but their configured `unworked_border` weight, keeping county lines visible.
