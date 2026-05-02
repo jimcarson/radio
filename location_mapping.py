@@ -9,7 +9,7 @@
 #   - East Timor added as alias for Timor-Leste
 #   - Kosovo added with de-facto code XK
 # ---------------------------------------------------------------------------
-__version__ = "1.0.2"  # add US_CODES frozenset; add DXCC_US/DXCC_CA constants
+__version__ = "1.0.3"  # LOTW Exceptions to the GSAK ISO names
 
 _STATE_POSTAL: dict[str, str] = {
     # US states — standard spaced names
