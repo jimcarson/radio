@@ -20,6 +20,8 @@ Options:
     --date-from DATE        Filter QSOs on or after date (YYYYMMDD or YYYY-MM-DD)
     --date-to DATE          Filter QSOs on or before date (YYYYMMDD or YYYY-MM-DD)
     --confirmed             Only show confirmed QSOs (LoTW or QSL card received)
+    --include-null-grid     Include JJ00 contacts (default: excluded — JJ00 is a
+                            placeholder grid for contacts with no location data)
     --show-arcs             Show great-circle arc lines (default: off — slow on large logs)
     --show-filters          Show collapsible band/mode filter panel (top-left corner)
     --overlay LIST          Comma-separated overlays: grids, states, counties
@@ -28,7 +30,7 @@ Options:
     --output FILE           Output HTML filename (default: map_output.html next to input file)
 """
 
-__version__ = "1.2.1"  # DXCC_US/DXCC_CA moved to location_mapping; imported at module level with inline fallback
+__version__ = "1.2.2"  # Exclude JJ00 null-grid contacts by default; --include-null-grid flag to re-enable
 
 import argparse
 import sys
@@ -161,6 +163,41 @@ def is_confirmed(record: dict):
     return lotw == 'Y' or qsl == 'Y'
 
 
+# JJ00 bounding box: 0°–2° N latitude, 0°–2° W longitude
+_JJ00_LAT_MIN, _JJ00_LAT_MAX =  0.0,  2.0
+_JJ00_LON_MIN, _JJ00_LON_MAX = -2.0,  0.0
+
+def is_null_grid(record: dict) -> bool:
+    """
+    Return True if this record resolves to the JJ00 null grid.
+
+    JJ00 is commonly used as a placeholder when the contacted station has no
+    meaningful location — it falls in the Atlantic Ocean near the prime meridian
+    and equator, producing a dense meaningless cluster on the map.
+
+    Detection covers two cases:
+      1. GRIDSQUARE field starts with 'JJ00' (case-insensitive), regardless of
+         any further sub-square characters (e.g. JJ00aa also matches).
+      2. Explicit LAT/LON coordinates that fall within the JJ00 bounding box
+         (0°–2° N, 0°–2° W).
+    """
+    grid = (record.get('GRIDSQUARE') or record.get('GRID') or '').strip().upper()
+    if grid.startswith('JJ00'):
+        return True
+
+    lat_raw = record.get('LAT') or record.get('MY_LAT')
+    lon_raw = record.get('LON') or record.get('MY_LON')
+    if lat_raw and lon_raw:
+        lat = adif_latlon_to_decimal(lat_raw)
+        lon = adif_latlon_to_decimal(lon_raw)
+        if (lat is not None and lon is not None
+                and _JJ00_LAT_MIN <= lat <= _JJ00_LAT_MAX
+                and _JJ00_LON_MIN <= lon <= _JJ00_LON_MAX):
+            return True
+
+    return False
+
+
 def _build_mode_filter(args) -> set:
     """
     Build the set of modes to include from --mode and/or --modes.
@@ -194,6 +231,8 @@ def apply_filters(records, args):
         if date_to and date > date_to:
             continue
         if args.confirmed and not is_confirmed(r):
+            continue
+        if not getattr(args, 'include_null_grid', False) and is_null_grid(r):
             continue
         out.append(r)
     return out
@@ -922,6 +961,8 @@ def main():
                         help="End date filter — YYYYMMDD or YYYY-MM-DD (inclusive)")
     parser.add_argument("--confirmed", action="store_true",
                         help="Only show confirmed QSOs (LoTW or QSL received)")
+    parser.add_argument("--include-null-grid", dest="include_null_grid", action="store_true",
+                        help="Include JJ00 contacts (excluded by default — JJ00 is a placeholder for contacts with no location)")
     parser.add_argument("--show-arcs", dest="show_arcs", action="store_true",
                         help="Draw great-circle arc lines (default: off — slow on large logs)")
     parser.add_argument("--arc-max", dest="arc_max", type=int, default=1000,
@@ -980,6 +1021,10 @@ def main():
 
     filtered = apply_filters(records, args)
     print(f"  {len(filtered)} QSOs after filtering.")
+    if not args.include_null_grid:
+        null_count = sum(1 for r in records if is_null_grid(r))
+        if null_count:
+            print(f"  {null_count} JJ00 (null-grid) contact(s) excluded — use --include-null-grid to show them.")
 
     from collections import Counter
     mode_counts = Counter(r.get('MODE', 'unknown').upper() for r in filtered)
