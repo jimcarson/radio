@@ -9,7 +9,7 @@
 #   - East Timor added as alias for Timor-Leste
 #   - Kosovo added with de-facto code XK
 # ---------------------------------------------------------------------------
-__version__ = "1.0.1"  # add US_CODES derived frozenset (US states + territories, excluding CA_CODES)
+__version__ = "1.0.2"  # add US_CODES frozenset; add DXCC_US/DXCC_CA constants
 
 _STATE_POSTAL: dict[str, str] = {
     # US states — standard spaced names
@@ -577,6 +577,10 @@ def _dir_to_postal(dir_name: str) -> str | None:
 _POSTAL_STATE: dict[str, str] = {v: k for k, v in _STATE_POSTAL.items()}
 
 CA_CODES = {'AB','BC','MB','NB','NL','NS','NU','ON','PE','QC','SK','YT','NT'}
+
+# DXCC entity numbers for the US and Canada, as used in ADIF DXCC fields.
+DXCC_US: str = '291'
+DXCC_CA: str = '1'
 
 # US state + territory postal codes — derived from _STATE_POSTAL minus CA_CODES.
 # Used by map_core.build_counties_overlay() to route keys to us_counties.geojson
