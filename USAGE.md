@@ -209,7 +209,7 @@ Records are matched using: **Callsign + Date + Time (HHMM)**.
 
 ## `adif_extract.py`
 
-Extracts QSOs from a QRZ ADIF export to an inspection CSV, with optional date-range or single-date filtering. Designed for the common portable-operations workflow: export a range of contacts, spot-check `MY_` fields and `COMMENT` in Excel, fill in corrections, then feed the result back to `resolve_qrz_discrepancies.py`.
+Extracts QSOs from any ADIF file (QRZ, LoTW, N3FJP, WSJT-X, …) to an inspection CSV or Excel workbook, with optional date-range, single-date, or country filtering. Designed for the common portable-operations workflow: export a range of contacts, spot-check `MY_` fields and `COMMENT` in Excel, fill in corrections, then feed the result back to `resolve_qrz_discrepancies.py`. Also useful as a diagnostic tool — extract contacts by country to investigate why specific regions aren't appearing in overlays.
 
 Does not call the QRZ API and requires no API key.
 
@@ -227,11 +227,27 @@ python adif_extract.py --adif wt8p.adi --date 2026-03-28
 python adif_extract.py --adif wt8p.adi --after 2026-03-20 --before 2026-03-31 --output-csv march_pota.csv
 ```
 
-**3. Open the CSV in Excel, review and fill in corrections**
+**3. Extract contacts by country (for diagnostics or map testing)**
+
+```bash
+# By full name substring
+python adif_extract.py --adif lotw.adi --country iceland --output-adi iceland.adi
+
+# By ISO code
+python adif_extract.py --adif lotw.adi --country IS --output-adi iceland.adi
+
+# Multiple countries
+python adif_extract.py --adif lotw.adi --country "DE,AT,CH" --output-xlsx dach.xlsx
+
+# Combined with date filter
+python adif_extract.py --adif lotw.adi --country CA --after 2022-09-01 --output-xlsx canada_trip.xlsx
+```
+
+**4. Open the CSV in Excel, review and fill in corrections**
 
 The `field` and `new_value` columns are blank — add the field to correct and its new value on each row. Duplicate a row if the same QSO needs multiple corrections. Delete rows you don't need to change.
 
-**4. Feed the edited CSV to resolve_qrz_discrepancies.py**
+**5. Feed the edited CSV to resolve_qrz_discrepancies.py**
 
 ```bash
 python resolve_qrz_discrepancies.py \
@@ -244,15 +260,45 @@ python resolve_qrz_discrepancies.py \
 ### All Options
 
 ```
---adif <file>           QRZ ADIF export file (required)
+--adif <file>           Source ADIF file (QRZ, LoTW, N3FJP, WSJT-X, ...)
 --date <DATE>           Extract a single date — shorthand for --after DATE --before DATE
                         Mutually exclusive with --after.
 --after <DATE>          Include QSOs on or after this date (inclusive)
 --before <DATE>         Include QSOs on or before this date (inclusive)
---output-csv <file>     Output CSV filename (default: adif_extract.csv)
+--country <TERM[,...]>  Filter by country — see Country Filtering below
+--preset <NAME>         Named inspection column preset (default: qrz)
+--fields <LIST>         Explicit comma-separated list of inspection columns
+--output-csv <file>     Narrow inspection CSV (default: adif_extract.csv)
+--no-csv                Suppress CSV output
+--output-xlsx <file>    Full Excel output with all ADIF fields, formatted for editing
+--output-adi <file>     Write matched QSOs as a raw ADIF file (also: --output-adif)
 ```
 
 Date formats accepted: `YYYY-MM-DD` or `YYYYMMDD`.
+
+### Country Filtering (`--country`)
+
+Filters QSOs by country, matched case-insensitively as a substring against both `COUNTRY` (the other party's country) and `MY_COUNTRY` (your operating location). Accepts comma-separated terms and combines freely with date filters.
+
+**Full name substrings** work directly:
+```bash
+--country iceland
+--country "european russia,asiatic russia"
+```
+
+**ISO 3166-1 alpha-2 codes** are also accepted and resolved in this order:
+1. `LOTW_COUNTRY_ALIASES` in `location_mapping.py` — handles cases where the LoTW/QRZ verbose country name doesn't match the standard ISO short form (e.g. `DE` → `GERMANY` to match `FEDERAL REPUBLIC OF GERMANY`)
+2. `ISO_TO_GSAK_NAME` — standard ISO → canonical name lookup (e.g. `IS` → `Iceland`)
+3. Literal fallback — the code itself is used as a substring if neither mapping has it
+
+```bash
+--country IS       # Iceland
+--country CA       # Canada
+--country "DE,AT,CH"   # Germany, Austria, Switzerland
+--country KR       # Korea — matches "REPUBLIC OF KOREA" (LoTW) and "South Korea" (QRZ)
+```
+
+> **DXCC entity note:** LoTW and QRZ use DXCC entity names, not political country names. Several entities have no ISO equivalent and must always be specified by name substring: `ALASKA`, `HAWAII`, `EUROPEAN RUSSIA`, `ASIATIC RUSSIA`, `DODECANESE`, `SARDINIA`, `SCOTLAND`, `ENGLAND`, `WALES`, `NORTHERN IRELAND`, `SABLE ISLAND`, `CEUTA & MELILLA`, `BALEARIC ISLANDS`, `GLORIOSO ISLAND`, `GUANTANAMO BAY`, `CHATHAM ISLAND`, `REUNION ISLAND`, and others. For these, use `--country "european russia"` or `--country alaska` rather than an ISO code.
 
 ### Output CSV Columns
 

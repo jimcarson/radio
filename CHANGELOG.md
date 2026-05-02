@@ -37,6 +37,36 @@
 - `build_counties_overlay()` — new `overlays_only` parameter. When `True`, unworked counties render with zero fill but their configured `unworked_border` weight, keeping county lines visible.
 - `THEME_DEFAULTS` grids section gains `unworked_fill`, `unworked_border`, and `unworked_weight` keys (matching the existing states/counties schema) so grid ghost styling is overrideable via `theme_default.yaml`.
 
+### `adif_map.py` (v1.2.4)
+
+- Fixed `is_confirmed()` to also check the standard ADIF `QSL_RCVD` field. Previously only `LOTW_QSL_RCVD` (QRZ export) and `QSLRCD` (paper QSL) were checked, so contacts loaded directly from a LoTW `.adi` export were always shown as worked rather than confirmed.
+
+### `adif_extract.py`
+
+**New `--country` filter**
+
+- Filters QSOs by country, matched as a case-insensitive substring against `COUNTRY` (the other party's country) and `MY_COUNTRY` (your operating location). Combines freely with date filters.
+- Accepts comma-separated terms: `--country iceland` or `--country "DE,AT,CH"`.
+- 2-letter ISO 3166-1 alpha-2 codes are resolved in priority order: `LOTW_COUNTRY_ALIASES` (handles LoTW/QRZ verbose names like `FEDERAL REPUBLIC OF GERMANY` for `DE`), then `ISO_TO_GSAK_NAME`, then literal fallback. Full country name substrings continue to work as before.
+
+**New `--output-adi` / `--output-adif`**
+
+- Writes matched QSOs as a raw ADIF file, suitable for piping directly into `adif_map.py` or other tools. Both flag spellings are accepted and map to the same argument (`--output-adif` was previously round-trip only and silently ignored in extract mode).
+
+### `location_mapping.py` (v1.0.3)
+
+**New `LOTW_COUNTRY_ALIASES` dict** — maps ISO codes to search substrings for cases where the standard ISO→GSAK name lookup would not match the verbose country names used by LoTW and QRZ exports:
+
+| Code | Search term | Rationale |
+|---|---|---|
+| `KR` | `KOREA` | LoTW: `REPUBLIC OF KOREA`; QRZ: `South Korea` |
+| `TL` | `TIMOR` | LoTW: `TIMOR - LESTE`; QRZ: `Timor Leste` |
+| `CD` | `CONGO` | Matches both Congo variants |
+| `CG` | `CONGO` | Republic of the Congo |
+| `DE` | `GERMANY` | LoTW: `FEDERAL REPUBLIC OF GERMANY` |
+| `ZA` | `SOUTH AFRICA` | LoTW: `REPUBLIC OF SOUTH AFRICA` |
+| `US` | `UNITED STATES` | Substring of `UNITED STATES OF AMERICA` |
+
 ---
 
 ## 2026-04-30
