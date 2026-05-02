@@ -34,7 +34,7 @@ Options:
     --output FILE           Output HTML filename (default: map_output.html next to input file)
 """
 
-__version__ = "1.2.3"  # JJ00 null-grid exclusion (--include-null-grid); --overlays-only hides dots and shows ghost unworked cells
+__version__ = "1.2.4"  # Fix is_confirmed: add QSL_RCVD check for LoTW export compatibility
 
 import argparse
 import sys
@@ -164,7 +164,8 @@ def _resolve_my_coords_for_record(record: dict):
 def is_confirmed(record: dict):
     lotw = record.get('LOTW_QSL_RCVD', '').upper()
     qsl  = record.get('QSLRCD', '').upper()
-    return lotw == 'Y' or qsl == 'Y'
+    qsl2 = record.get('QSL_RCVD', '').upper()   # standard ADIF field used by LoTW exports
+    return lotw == 'Y' or qsl == 'Y' or qsl2 == 'Y'
 
 
 # JJ00 bounding box: 0°–2° N latitude, 0°–2° W longitude
