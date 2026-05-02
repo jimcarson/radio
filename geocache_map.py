@@ -30,7 +30,7 @@ Options:
     --verbose           Show cache type breakdown and skipped count
 """
 
-__version__ = "1.3.1"  # CACHE_TYPE_COLORS colors moved to theme_default.yaml; labels stay in _CACHE_TYPE_LABELS; rebuilt at runtime by _build_cache_type_colors()
+__version__ = "1.3.2"  # replace local _CA_PROVINCE_CODES with CA_CODES from location_mapping; import _POSTAL_STATE from location_mapping instead of gsak_counties
 
 import argparse
 import sys
@@ -889,24 +889,19 @@ def main():
     overlays = [o.strip().lower() for o in (args.overlay or '').split(',') if o.strip()]
 
     # Pre-build separate sets of US state codes and Canadian province codes.
-    # _POSTAL_STATE maps 2-letter postal codes -> full names for both countries.
-    # GPX state fields may be either the 2-letter code (GSAK exports, Canada)
-    # or the full name (geocaching.com exports, US).  We build a reverse lookup
-    # (lowercased full name -> postal code) to handle both forms.
-    _CA_PROVINCE_CODES = {
-        'AB','BC','MB','NB','NL','NS','NT','NU','ON','PE','QC','SK','YT',
-    }
+    # CA_CODES and _POSTAL_STATE come from location_mapping, which is always
+    # available. GPX state fields may be either the 2-letter code (GSAK exports,
+    # Canada) or the full name (geocaching.com exports, US).  We build a reverse
+    # lookup (lowercased full name -> postal code) to handle both forms.
+    from location_mapping import CA_CODES as _CA_PROVINCE_CODES, _POSTAL_STATE as _ps_lm
     try:
-        from gsak_counties import _POSTAL_STATE as _ps, lookup_county as _lookup_county
-        _us_codes: set = set(_ps.keys()) - _CA_PROVINCE_CODES
-        _ca_codes: set = set(_ps.keys()) & _CA_PROVINCE_CODES
-        # Reverse map: lowercase full name -> 2-letter code (covers both US and CA)
-        _name_to_code: dict = {name.lower(): code for code, name in _ps.items()}
+        from gsak_counties import lookup_county as _lookup_county
     except ImportError:
-        _us_codes = set()
-        _ca_codes = _CA_PROVINCE_CODES
-        _name_to_code = {}
         _lookup_county = None
+    _us_codes: set = set(_ps_lm.keys()) - _CA_PROVINCE_CODES
+    _ca_codes: set = _CA_PROVINCE_CODES
+    # Reverse map: lowercase full name -> 2-letter code (covers both US and CA)
+    _name_to_code: dict = {name.lower(): code for code, name in _ps_lm.items()}
 
     # Combined set used in _cnty_key to detect "use the US/CA DB branch"
     _us_ca_codes: set = _us_codes | _ca_codes
