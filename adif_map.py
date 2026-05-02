@@ -28,7 +28,7 @@ Options:
     --output FILE           Output HTML filename (default: map_output.html next to input file)
 """
 
-__version__ = "1.2.0"  # De-prefix county name normalisation for LoTW/GSAK alignment
+__version__ = "1.2.1"  # DXCC_US/DXCC_CA moved to location_mapping; imported at module level with inline fallback
 
 import argparse
 import sys
@@ -66,6 +66,12 @@ except ImportError:
     sys.exit(
         "Missing map_core.py — ensure it is in the same directory as adif_map.py."
     )
+
+try:
+    from location_mapping import DXCC_US, DXCC_CA
+except ImportError:
+    DXCC_US = '291'   # United States
+    DXCC_CA = '1'     # Canada
 
 
 
@@ -1012,14 +1018,12 @@ def main():
         return catch_all_lbl
 
     # Tag _confirmed flag onto each record for map_core overlay builders
-    _DXCC_US = '291'
-    _DXCC_CA = '1'
     for r in filtered:
         r['_confirmed'] = is_confirmed(r)
 
     # Key functions for overlay builders
-    def _us_key(r): return r.get('STATE','').upper().strip()[:2] if r.get('DXCC','') == _DXCC_US else ''
-    def _ca_key(r): return r.get('STATE','').upper().strip()[:2] if r.get('DXCC','') == _DXCC_CA else ''
+    def _us_key(r): return r.get('STATE','').upper().strip()[:2] if r.get('DXCC','') == DXCC_US else ''
+    def _ca_key(r): return r.get('STATE','').upper().strip()[:2] if r.get('DXCC','') == DXCC_CA else ''
     def _cnty_key_fn(r):
         import re as _re
         cnty = r.get('CNTY','').strip()
