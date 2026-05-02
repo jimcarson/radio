@@ -1,0 +1,5 @@
+# Optional tile provider API keys
+# Remove or comment out any line to disable that provider
+# 
+#thunderforest : your-thunderforest-key-here
+#stadia        : your-stadia-key-here
