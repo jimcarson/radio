@@ -609,3 +609,13 @@ _VA_CITY_STEMS: frozenset = frozenset({
     'Waynesboro_City', 'Williamsburg_City', 'Winchester_City',
     # Charles_City and James_City are genuine counties — NOT in this set
 })
+
+LOTW_COUNTRY_ALIASES: dict[str, str] = {
+    'KR': 'KOREA',          # matches "REPUBLIC OF KOREA" and "SOUTH KOREA" (QRZ)
+    'TL': 'TIMOR',          # matches "TIMOR - LESTE" and "Timor Leste"
+    'CD': 'CONGO',          # matches both Congo variants
+    'CG': 'CONGO',          # Republic of the Congo
+    'DE': 'GERMANY',        # LoTW uses "FEDERAL REPUBLIC OF GERMANY"
+    'ZA': 'SOUTH AFRICA',   # LoTW uses "REPUBLIC OF SOUTH AFRICA"
+    'US': 'UNITED STATES',  # substring of "UNITED STATES OF AMERICA"
+}
