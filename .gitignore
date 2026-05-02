@@ -19,3 +19,5 @@ us_counties_light.geojson
 .gitignore
 # Ignore vim turds
 *.swp
+# MAP API keys
+map.cfg
