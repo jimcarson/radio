@@ -18,7 +18,7 @@ Dependencies:
 
 from pathlib import Path
 
-__version__ = "1.4.3"  # fix Canadian county routing (_is_us_ca uses US-only codes); add cache_types to THEME_DEFAULTS/load_theme(); expose CACHE_TYPE_COLORS global
+__version__ = "1.4.4"  # overlays_only mode: ghost (unworked) cells for grids/states/counties with visible border + hover tooltip
 
 try:
     import yaml
@@ -86,9 +86,12 @@ THEME_DEFAULTS: dict = {
             "unworked_opacity": 0.0,
         },
         "grids": {
-            "confirmed":   "#27ae9e",
-            "worked":      "#e8a020",
-            "fill_opacity": 0.45,
+            "confirmed":        "#27ae9e",
+            "worked":           "#e8a020",
+            "fill_opacity":     0.45,
+            "unworked_fill":    "#ffffff",
+            "unworked_border":  "#888888",
+            "unworked_weight":  0.8,
         },
     },
     "cache_types": {
@@ -398,14 +401,57 @@ def _style_for_status(status: str | None, cfg: dict) -> dict:
 # Grid square choropleth
 # ---------------------------------------------------------------------------
 
+def _all_grid4_in_bbox(lat_min: float, lat_max: float,
+                       lon_min: float, lon_max: float) -> list:
+    """
+    Return all valid 4-char Maidenhead grid squares whose SW corner falls
+    within the given lat/lon bounding box (degrees).
+
+    Grid cell size: 2° lon × 1° lat.
+    Field letters:  A–R  (lon: -180 to +180 in 20° steps)
+                         (lat:  -90 to  +90 in 10° steps)
+    Square digits:  0–9  (lon: 2° steps within field)
+                         (lat: 1° steps within field)
+    """
+    results = []
+    # Clamp to valid Maidenhead range
+    lat_min = max(lat_min, -90.0)
+    lat_max = min(lat_max,  89.0)
+    lon_min = max(lon_min, -180.0)
+    lon_max = min(lon_max,  178.0)
+
+    # Snap to grid-cell boundaries
+    col_start = int((lon_min + 180) / 2)
+    col_end   = int((lon_max + 180) / 2)
+    row_start = int((lat_min +  90) / 1)
+    row_end   = int((lat_max +  90) / 1)
+
+    for col in range(col_start, col_end + 1):
+        field_col = col // 10          # 0–17  -> 'A'–'R'
+        sq_col    = col  % 10          # 0–9
+        for row in range(row_start, row_end + 1):
+            field_row = row // 10      # 0–17  -> 'A'–'R'
+            sq_row    = row  % 10      # 0–9
+            grid = (chr(ord('A') + field_col) +
+                    chr(ord('A') + field_row) +
+                    str(sq_col) +
+                    str(sq_row))
+            results.append(grid)
+    return results
+
+
 def build_grid_overlay(m: folium.Map, records: list,
                        key_fn=None, dynamic: bool = False,
-                       group_fn=None, band_fn=None) -> dict:
+                       group_fn=None, band_fn=None,
+                       overlays_only: bool = False) -> dict:
     """
     Add a Maidenhead grid-square choropleth layer.
 
     key_fn(record) -> 4-char grid string (default: record['GRIDSQUARE'][:4])
     When dynamic=True, embed per-record data for JS recompute.
+    When overlays_only=True, also render unworked ghost cells (transparent fill,
+    visible border, hoverable tooltip) for all grids within the bounding box of
+    worked grids ± 1-cell padding.
     """
     def _default_key(r):
         g = r.get('GRIDSQUARE', '')[:4].upper()
@@ -419,7 +465,31 @@ def build_grid_overlay(m: folium.Map, records: list,
         print("  Grid overlay: no grid data found — skipping.")
         return {}
 
+    # ------------------------------------------------------------------
+    # When overlays_only: enumerate all grids in worked-bbox + 1-cell pad
+    # ------------------------------------------------------------------
+    ghost_grids: set = set()
+    if overlays_only and status:
+        # Derive bounding box from SW corners of worked grids (each cell is 2°×1°)
+        worked_lons = []
+        worked_lats = []
+        for grid in status:
+            try:
+                ring = grid4_polygon(grid)
+                worked_lons.append(ring[0][0])   # SW lon
+                worked_lats.append(ring[0][1])   # SW lat
+            except Exception:
+                pass
+        if worked_lons:
+            lon_min = min(worked_lons) - 2   # 1-cell pad (2° lon)
+            lon_max = max(worked_lons) + 2
+            lat_min = min(worked_lats) - 1   # 1-cell pad (1° lat)
+            lat_max = max(worked_lats) + 1
+            all_in_box = _all_grid4_in_bbox(lat_min, lat_max, lon_min, lon_max)
+            ghost_grids = set(all_in_box) - set(status.keys())
+
     features = []
+    # Worked / confirmed cells
     for grid, state in status.items():
         try:
             ring = grid4_polygon(grid)
@@ -437,9 +507,34 @@ def build_grid_overlay(m: folium.Map, records: list,
             'geometry': {'type': 'Polygon', 'coordinates': [ring]},
         })
 
+    # Ghost (unworked) cells — only added in overlays_only mode
+    for grid in sorted(ghost_grids):
+        try:
+            ring = grid4_polygon(grid)
+        except Exception:
+            continue
+        features.append({
+            'type': 'Feature',
+            'properties': {
+                'grid': grid, 'key': grid, 'status': None,
+                'count': 0, 'tooltip': grid,
+            },
+            'geometry': {'type': 'Polygon', 'coordinates': [ring]},
+        })
+
     geojson = {'type': 'FeatureCollection', 'features': features}
+
     def style_fn(feature):
-        return _style_for_status(feature['properties']['status'], GRIDS_COLORS)
+        st = feature['properties']['status']
+        if st is None:
+            # Ghost cell: visible border, transparent fill, hoverable
+            return {
+                'fillColor':   GRIDS_COLORS.get('unworked_fill',   '#ffffff'),
+                'color':       GRIDS_COLORS.get('unworked_border', '#888888'),
+                'weight':      GRIDS_COLORS.get('unworked_weight', 0.8),
+                'fillOpacity': 0.0,
+            }
+        return _style_for_status(st, GRIDS_COLORS)
 
     fg  = folium.FeatureGroup(name='Overlay: Grid squares', show=True)
     gjl = folium.GeoJson(
@@ -452,7 +547,9 @@ def build_grid_overlay(m: folium.Map, records: list,
 
     confirmed_n = sum(1 for s in status.values() if s == 'confirmed')
     worked_n    = sum(1 for s in status.values() if s == 'worked')
-    print(f"  Grid overlay: {confirmed_n} confirmed, {worked_n} worked-only squares.")
+    ghost_n     = len(ghost_grids)
+    ghost_note  = f", {ghost_n} unworked ghost cells" if ghost_n else ""
+    print(f"  Grid overlay: {confirmed_n} confirmed, {worked_n} worked-only squares{ghost_note}.")
     _add_state_borders(m)
 
     if dynamic and group_fn and band_fn:
@@ -618,13 +715,16 @@ def build_states_overlay(m: folium.Map, records: list,
                          us_key_fn=None, ca_key_fn=None,
                          dynamic: bool = False,
                          group_fn=None, band_fn=None,
-                         cache_path: Path = None) -> dict:
+                         cache_path: Path = None,
+                         overlays_only: bool = False) -> dict:
     """
     Add a US states + Canadian provinces choropleth layer.
 
     us_key_fn(record) -> 2-char US state postal code or ''
     ca_key_fn(record) -> 2-char CA province code or ''
     cache_path        : override for ne_states.geojson location
+    overlays_only     : when True, render unworked states with a visible border
+                        (transparent fill) so they are hoverable
     """
     geo_path = cache_path or _STATES_CACHE
 
@@ -680,7 +780,16 @@ def build_states_overlay(m: folium.Map, records: list,
     def style_fn(feature):
         postal = (feature['properties'].get('postal') or '').upper()
         info   = lookup.get(postal)
-        return _style_for_status(info['status'] if info else None, STATES_COLORS)
+        st     = info['status'] if info else None
+        if st is None and overlays_only:
+            # Ghost state: visible border, transparent fill
+            return {
+                'fillColor':   STATES_COLORS.get('unworked_fill',   '#ffffff'),
+                'color':       STATES_COLORS.get('unworked_border', '#666666'),
+                'weight':      STATES_COLORS.get('unworked_weight', 0.8),
+                'fillOpacity': 0.10,
+            }
+        return _style_for_status(st, STATES_COLORS)
 
     fg  = folium.FeatureGroup(name='Overlay: States & Provinces', show=True)
     gjl = folium.GeoJson(
@@ -718,7 +827,8 @@ def build_counties_overlay(m: folium.Map, records: list,
                             dynamic: bool = False,
                             group_fn=None, band_fn=None,
                             cache_path: Path = None,
-                            db_path=None) -> dict:
+                            db_path=None,
+                            overlays_only: bool = False) -> dict:
     """
     Add a county/district choropleth layer for US, CA, and international regions.
 
@@ -728,6 +838,8 @@ def build_counties_overlay(m: folium.Map, records: list,
                      Keys whose state_code is not a US/CA postal code are looked
                      up in the DB counties table and merged into one layer.
                      If None, only US/CA GeoJSON keys are rendered.
+    overlays_only  : when True, render unworked counties with a visible border
+                     (transparent fill) so they are hoverable
     """
     # US-only postal codes — Canadian province codes are intentionally absent
     # so they route to the DB path along with other international regions.
@@ -855,7 +967,16 @@ def build_counties_overlay(m: folium.Map, records: list,
     def style_fn(feature):
         key  = feature['properties'].get('adif_key', '')
         info = status.get(key)
-        return _style_for_status(info if isinstance(info, str) else None, COUNTIES_COLORS)
+        st   = info if isinstance(info, str) else None
+        if st is None and overlays_only:
+            # Ghost county: visible border, transparent fill
+            return {
+                'fillColor':   COUNTIES_COLORS.get('unworked_fill',   '#ffffff'),
+                'color':       COUNTIES_COLORS.get('unworked_border', '#000000'),
+                'weight':      COUNTIES_COLORS.get('unworked_weight', 0.3),
+                'fillOpacity': 0.0,
+            }
+        return _style_for_status(st, COUNTIES_COLORS)
 
     fg  = folium.FeatureGroup(name='Overlay: Counties', show=True)
     gjl = folium.GeoJson(

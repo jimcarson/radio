@@ -22,6 +22,9 @@ Options:
     --confirmed             Only show confirmed QSOs (LoTW or QSL card received)
     --include-null-grid     Include JJ00 contacts (default: excluded — JJ00 is a
                             placeholder grid for contacts with no location data)
+    --overlays-only         Hide contact dots; show only overlay choropleth.
+                            Unworked cells render as ghost polygons (transparent
+                            fill, visible border) so you can hover to identify them.
     --show-arcs             Show great-circle arc lines (default: off — slow on large logs)
     --show-filters          Show collapsible band/mode filter panel (top-left corner)
     --overlay LIST          Comma-separated overlays: grids, states, counties
@@ -30,7 +33,7 @@ Options:
     --output FILE           Output HTML filename (default: map_output.html next to input file)
 """
 
-__version__ = "1.2.2"  # Exclude JJ00 null-grid contacts by default; --include-null-grid flag to re-enable
+__version__ = "1.2.3"  # JJ00 null-grid exclusion (--include-null-grid); --overlays-only hides dots and shows ghost unworked cells
 
 import argparse
 import sys
@@ -318,7 +321,8 @@ def _select_arcs(records: list, arc_max: int = 1000,
 
 
 def build_map(my_coords, records, show_arcs: bool,
-              arc_max: int = 1000, arc_cell_max: int = 2):
+              arc_max: int = 1000, arc_cell_max: int = 2,
+              overlays_only: bool = False):
     from folium.plugins import MarkerCluster
 
     m = build_base_map(my_coords[0], my_coords[1])
@@ -415,49 +419,55 @@ def build_map(my_coords, records, show_arcs: bool,
 
     skipped = 0
 
-    for r in records:
-        coords = resolve_coords(r)
-        if coords is None:
-            skipped += 1
-            continue
+    if not overlays_only:
+        for r in records:
+            coords = resolve_coords(r)
+            if coords is None:
+                skipped += 1
+                continue
 
-        band   = r.get('BAND', 'unknown').lower()
-        mode   = r.get('MODE', '').upper()
-        call   = r.get('CALL', '?')
-        date   = r.get('QSO_DATE', '')
-        color  = BAND_COLORS.get(band, DEFAULT_COLOR)
-        conf   = "✓ confirmed" if is_confirmed(r) else ""
-        origin = _resolve_my_coords_for_record(r) or my_coords
-        grp    = _mode_to_group(mode)
-        tooltip_text = f"{call} | {band} {mode} | {date} {conf}"
+            band   = r.get('BAND', 'unknown').lower()
+            mode   = r.get('MODE', '').upper()
+            call   = r.get('CALL', '?')
+            date   = r.get('QSO_DATE', '')
+            color  = BAND_COLORS.get(band, DEFAULT_COLOR)
+            conf   = "✓ confirmed" if is_confirmed(r) else ""
+            origin = _resolve_my_coords_for_record(r) or my_coords
+            grp    = _mode_to_group(mode)
+            tooltip_text = f"{call} | {band} {mode} | {date} {conf}"
 
-        if grp not in mode_fgs:
-            fg = folium.FeatureGroup(name=f"Mode: {grp}", show=True)
-            mode_fgs[grp] = fg
-            mode_clusters[grp] = MarkerCluster(
-                icon_create_function=cluster_icon_fn,
-                options={"maxClusterRadius": 40, "disableClusteringAtZoom": 9},
-            ).add_to(fg)
+            if grp not in mode_fgs:
+                fg = folium.FeatureGroup(name=f"Mode: {grp}", show=True)
+                mode_fgs[grp] = fg
+                mode_clusters[grp] = MarkerCluster(
+                    icon_create_function=cluster_icon_fn,
+                    options={"maxClusterRadius": 40, "disableClusteringAtZoom": 9},
+                ).add_to(fg)
 
-        _dot = CONTACT_DOT
-        marker = folium.CircleMarker(
-            location=coords,
-            radius=_dot.get("radius", 6),
-            color=_dot.get("border_color", "white"),
-            weight=_dot.get("border_weight", 1.2),
-            fill=True,
-            fill_color=color,
-            fill_opacity=_dot.get("fill_opacity", 0.85),
-            tooltip=tooltip_text,
-        )
-        marker.add_to(mode_clusters[grp])
-        band_groups[band] = None
+            _dot = CONTACT_DOT
+            marker = folium.CircleMarker(
+                location=coords,
+                radius=_dot.get("radius", 6),
+                color=_dot.get("border_color", "white"),
+                weight=_dot.get("border_weight", 1.2),
+                fill=True,
+                fill_color=color,
+                fill_opacity=_dot.get("fill_opacity", 0.85),
+                tooltip=tooltip_text,
+            )
+            marker.add_to(mode_clusters[grp])
+            band_groups[band] = None
 
-    for fg in mode_fgs.values():
-        fg.add_to(m)
+        for fg in mode_fgs.values():
+            fg.add_to(m)
+    else:
+        # overlays_only: still collect band_groups for legend/layer_meta
+        for r in records:
+            band = r.get('BAND', 'unknown').lower()
+            band_groups[band] = None
 
     # Draw decimated arcs after markers so they don't block tooltips
-    if show_arcs:
+    if show_arcs and not overlays_only:
         arc_records = _select_arcs(records, arc_max=arc_max,
                                    arc_cell_max=arc_cell_max)
         arc_fg = folium.FeatureGroup(name="Arcs", show=True)
@@ -963,6 +973,8 @@ def main():
                         help="Only show confirmed QSOs (LoTW or QSL received)")
     parser.add_argument("--include-null-grid", dest="include_null_grid", action="store_true",
                         help="Include JJ00 contacts (excluded by default — JJ00 is a placeholder for contacts with no location)")
+    parser.add_argument("--overlays-only", dest="overlays_only", action="store_true",
+                        help="Hide contact dots; show overlay choropleth only. Unworked cells render as ghost polygons (border + transparent fill, hoverable).")
     parser.add_argument("--show-arcs", dest="show_arcs", action="store_true",
                         help="Draw great-circle arc lines (default: off — slow on large logs)")
     parser.add_argument("--arc-max", dest="arc_max", type=int, default=1000,
@@ -1025,6 +1037,8 @@ def main():
         null_count = sum(1 for r in records if is_null_grid(r))
         if null_count:
             print(f"  {null_count} JJ00 (null-grid) contact(s) excluded — use --include-null-grid to show them.")
+    if args.overlays_only:
+        print("  --overlays-only: contact dots suppressed; unworked overlay cells shown as ghost polygons.")
 
     from collections import Counter
     mode_counts = Counter(r.get('MODE', 'unknown').upper() for r in filtered)
@@ -1050,7 +1064,8 @@ def main():
     m, plotted, layer_meta = build_map(my_coords, filtered,
                                        show_arcs=args.show_arcs,
                                        arc_max=args.arc_max,
-                                       arc_cell_max=args.arc_cell_max)
+                                       arc_cell_max=args.arc_cell_max,
+                                       overlays_only=args.overlays_only)
     # Collect band groups that were actually used (for legend)
     used_bands = {r.get('BAND', 'unknown').lower() for r in filtered if resolve_coords(r)}
     add_legend(m, {b: None for b in used_bands}, hidden=args.show_filters)
@@ -1107,7 +1122,8 @@ def main():
         result = build_states_overlay(m, filtered,
                                       us_key_fn=_us_key, ca_key_fn=_ca_key,
                                       dynamic=args.show_filters,
-                                      group_fn=_grp_fn, band_fn=_band_fn)
+                                      group_fn=_grp_fn, band_fn=_band_fn,
+                                      overlays_only=args.overlays_only)
         if result:
             overlay_meta['states'] = result
     if "counties" in overlays:
@@ -1115,7 +1131,8 @@ def main():
         result = build_counties_overlay(m, filtered,
                                         key_fn=_cnty_key_fn,
                                         dynamic=args.show_filters,
-                                        group_fn=_grp_fn, band_fn=_band_fn)
+                                        group_fn=_grp_fn, band_fn=_band_fn,
+                                        overlays_only=args.overlays_only)
         if result:
             overlay_meta['counties'] = result
     if "grids" in overlays:
@@ -1123,7 +1140,8 @@ def main():
         result = build_grid_overlay(m, filtered,
                                     key_fn=_grid_key,
                                     dynamic=args.show_filters,
-                                    group_fn=_grp_fn, band_fn=_band_fn)
+                                    group_fn=_grp_fn, band_fn=_band_fn,
+                                    overlays_only=args.overlays_only)
         if result:
             overlay_meta['grids'] = result
     if overlays:
@@ -1153,7 +1171,10 @@ def main():
 
     m.save(str(out_path))
     print(f"  Map saved → {out_path}")
-    print(f"  Plotted {plotted} contacts.")
+    if args.overlays_only:
+        print(f"  {plotted} contacts included in overlay choropleth (dots hidden).")
+    else:
+        print(f"  Plotted {plotted} contacts.")
 
     webbrowser.open(out_path.as_uri())
 

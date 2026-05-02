@@ -1,5 +1,36 @@
 # Changelog
 
+## 2026-05-02
+
+### `adif_map.py` (v1.2.3)
+
+**JJ00 null-grid exclusion**
+
+- Contacts resolving to the JJ00 grid are now excluded by default. JJ00 (0°–2° N, 0°–2° W, mid-Atlantic near the prime meridian/equator) is a common placeholder for stations with no real location data and previously produced a dense, meaningless cluster on the map.
+- Detection covers two cases: `GRIDSQUARE` starting with `JJ00` (any sub-square suffix, case-insensitive), and explicit `LAT`/`LON` coordinates falling within the JJ00 bounding box.
+- New `is_null_grid(record)` helper encapsulates both checks.
+- New CLI flag `--include-null-grid` re-enables JJ00 contacts when needed.
+- Console output reports the count of excluded JJ00 contacts when any are present.
+
+**`--overlays-only` mode**
+
+- New CLI flag `--overlays-only` hides all contact dots (MarkerCluster FeatureGroups) and arcs, leaving only the choropleth overlay(s) visible. Home station markers are preserved.
+- When active, unworked cells in all overlay types render as ghost polygons: transparent fill, visible border, fully hoverable — so you can identify needed grids/states/counties directly without inferring from neighbors.
+- `band_groups` is still populated in overlays-only mode so the legend and `layer_meta` remain consistent.
+- Console output reflects the suppression.
+
+### `map_core.py` (v1.4.4)
+
+**Ghost cell rendering for `--overlays-only`**
+
+- `build_grid_overlay()` — new `overlays_only` parameter. When `True`, enumerates all valid Maidenhead grid4 squares within the bounding box of worked grids ± 1-cell padding (2° lon × 1° lat per cell) and adds unworked ones as ghost features styled with a visible border, zero fill opacity, and a tooltip showing just the grid designator (e.g. `DN82`). Ghost count reported in console output.
+- New `_all_grid4_in_bbox(lat_min, lat_max, lon_min, lon_max)` helper enumerates all valid grid4 squares whose SW corner falls within the given bounding box. Clamps to Maidenhead limits and snaps to grid-cell boundaries.
+- `build_states_overlay()` — new `overlays_only` parameter. When `True`, unworked states render with a faint fill (`fillOpacity: 0.10`) and their configured border, making them hoverable for identification.
+- `build_counties_overlay()` — new `overlays_only` parameter. When `True`, unworked counties render with zero fill but their configured `unworked_border` weight, keeping county lines visible.
+- `THEME_DEFAULTS` grids section gains `unworked_fill`, `unworked_border`, and `unworked_weight` keys (matching the existing states/counties schema) so grid ghost styling is overrideable via `theme_default.yaml`.
+
+---
+
 ## 2026-04-30
 
 ### New files
