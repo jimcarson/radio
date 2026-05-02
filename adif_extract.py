@@ -28,10 +28,14 @@ Usage - extract mode (requires --adif)
     python adif_extract.py --adif qrz_export.adi --preset lotw --output-xlsx lotw_check.xlsx
     python adif_extract.py --adif qrz_export.adi --fields GRIDSQUARE,STATE,CNTY
     python adif_extract.py --adif qrz_export.adi --date 2026-03-28 --output-xlsx pota.xlsx --no-csv
+    python adif_extract.py --adif lotw.adi --country iceland --output-adi iceland.adi
+    python adif_extract.py --adif lotw.adi --country IS --output-adi iceland.adi
+    python adif_extract.py --adif lotw.adi --country "DE,AT,CH" --output-xlsx dach.xlsx
+    python adif_extract.py --adif lotw.adi --country "european russia,asiatic russia" --output-xlsx russia.xlsx
 
 Usage - round-trip mode (requires --from-xlsx)
 -----------------------------------------------
-    python adif_extract.py --from-xlsx pota.xlsx --output-adif pota_fixed.adi
+    python adif_extract.py --from-xlsx pota.xlsx --output-adi pota_fixed.adi
 
 Date formats accepted by --after / --before / --date
 ------------------------------------------------------
@@ -78,6 +82,8 @@ Requirements
     pip install openpyxl requests
 
 2026-04-14 Jim Carson (WT8P)
+2026-05-02 Add --country filter (substring match on COUNTRY/MY_COUNTRY) and --output-adi;
+           ISO 3166-1 alpha-2 codes resolved via LOTW_COUNTRY_ALIASES / ISO_TO_GSAK_NAME
 """
 
 import argparse
@@ -147,6 +153,48 @@ def _in_range(qso_date: str, after: str, before: str) -> bool:
     return True
 
 
+def _matches_country(rec: dict, terms: list[str]) -> bool:
+    """
+    Return True if any country term matches COUNTRY or MY_COUNTRY
+    as a case-insensitive substring.  Empty terms list = no filter (all pass).
+
+    2-letter terms are treated as ISO 3166-1 alpha-2 codes and resolved to a
+    search string in this priority order:
+      1. LOTW_COUNTRY_ALIASES  — handles cases where the LoTW/QRZ country name
+                                  differs from the ISO/GSAK canonical name
+                                  (e.g. 'DE' -> 'GERMANY' matches
+                                  'FEDERAL REPUBLIC OF GERMANY')
+      2. ISO_TO_GSAK_NAME      — standard ISO -> GSAK canonical name lookup
+      3. Literal fallback      — use the 2-letter code as-is (handles unknown codes)
+    """
+    if not terms:
+        return True
+
+    try:
+        from location_mapping import LOTW_COUNTRY_ALIASES, ISO_TO_GSAK_NAME
+    except ImportError:
+        LOTW_COUNTRY_ALIASES = {}
+        ISO_TO_GSAK_NAME = {}
+
+    country    = rec.get("COUNTRY",    "").upper()
+    my_country = rec.get("MY_COUNTRY", "").upper()
+
+    for term in terms:
+        t = term.strip()
+        # Resolve 2-letter ISO codes to a search string
+        if len(t) == 2 and t.isalpha():
+            code = t.upper()
+            search = (LOTW_COUNTRY_ALIASES.get(code)
+                      or ISO_TO_GSAK_NAME.get(code)
+                      or code)
+        else:
+            search = t
+        s = search.upper()
+        if s in country or s in my_country:
+            return True
+    return False
+
+
 # ---------------------------------------------------------------------------
 # Column ordering for Full Excel
 # ---------------------------------------------------------------------------
@@ -188,15 +236,20 @@ def extract(
     inspection_fields: list[str],
     after:             str = "",
     before:            str = "",
+    country_terms:     list[str] = None,
 ) -> tuple[list[dict], list[tuple], list[str]]:
     """
-    Filter records by date range.
+    Filter records by date range and/or country.
+
+    country_terms: list of lowercase substrings to match against COUNTRY or
+                   MY_COUNTRY (case-insensitive).  Empty list = no filter.
 
     Returns:
         rows_narrow  -- inspection CSV rows (with field/new_value placeholders)
         filtered     -- list of (rec, adif_date, adif_time) for Excel writing
         all_columns  -- ordered full column list for Excel
     """
+    country_terms = country_terms or []
     all_field_names: set[str] = set()
     filtered: list[tuple] = []
 
@@ -205,6 +258,8 @@ def extract(
             rec.get("QSO_DATE", ""), rec.get("TIME_ON", "")
         )
         if not _in_range(adif_date, after, before):
+            continue
+        if not _matches_country(rec, country_terms):
             continue
         filtered.append((rec, adif_date, adif_time))
         all_field_names.update(rec.keys())
@@ -446,6 +501,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Include QSOs on or after this date (inclusive)")
     p.add_argument("--before", default="", metavar="DATE",
         help="Include QSOs on or before this date (inclusive)")
+    p.add_argument("--country", default="", metavar="TERM[,TERM,...]",
+        help=(
+            "Filter by country — comma-separated substring(s) or 2-letter ISO codes, "
+            "matched case-insensitively against COUNTRY (other party) and MY_COUNTRY "
+            "(your operating location). "
+            "E.g. --country IS  or  --country iceland  or  --country \"DE,AT,CH\". "
+            "ISO codes are resolved via LOTW_COUNTRY_ALIASES then ISO_TO_GSAK_NAME. "
+            "Combines freely with date filters."
+        ))
 
     # Field selection (extract mode only)
     fld_grp = p.add_mutually_exclusive_group()
@@ -462,8 +526,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Suppress CSV output (e.g. when only --output-xlsx is wanted)")
     p.add_argument("--output-xlsx", default="", metavar="FILE",
         help="Full Excel output with all ADIF fields, formatted for editing")
-    p.add_argument("--output-adif", default="adif_extract.adi", metavar="FILE",
-        help="ADIF output for --from-xlsx round-trip (default: adif_extract.adi)")
+    p.add_argument("--output-adi", "--output-adif", dest="output_adi", default="", metavar="FILE",
+        help="Write matched QSOs as a raw ADIF file (also accepted as --output-adif)")
 
     return p
 
@@ -481,8 +545,9 @@ def main() -> None:
             sys.exit(1)
         log.info("=== ADIF Extract -- Excel -> ADIF ===")
         log.info("Input  : %s", xlsx_path)
-        log.info("Output : %s", args.output_adif)
-        xlsx_to_adif(xlsx_path, Path(args.output_adif))
+        adif_out = args.output_adi or "adif_extract.adi"
+        log.info("Output : %s", adif_out)
+        xlsx_to_adif(xlsx_path, Path(adif_out))
         log.info("=== Done. ===")
         return
 
@@ -528,9 +593,17 @@ def main() -> None:
         if after:  log.info("After   : %s", f"{after[:4]}-{after[4:6]}-{after[6:]}")
         if before: log.info("Before  : %s", f"{before[:4]}-{before[4:6]}-{before[6:]}")
 
+    # Parse country filter
+    country_terms = [t.strip() for t in args.country.split(",") if t.strip()] \
+                    if args.country else []
+    if country_terms:
+        log.info("Country : %s (substring match on COUNTRY / MY_COUNTRY)",
+                 ", ".join(f'"{t}"' for t in country_terms))
+
     records = qrz.parse_adif_file(adif_path)
     rows_narrow, filtered, all_columns = extract(
-        records, inspection_fields, after=after, before=before
+        records, inspection_fields, after=after, before=before,
+        country_terms=country_terms,
     )
 
     if not filtered:
@@ -544,14 +617,20 @@ def main() -> None:
 
     if args.output_xlsx:
         write_xlsx(filtered, all_columns, inspection_fields, Path(args.output_xlsx))
-    elif args.no_csv:
-        log.warning("--no-csv specified but no --output-xlsx given; no output produced.")
+    elif args.no_csv and not args.output_adi:
+        log.warning("--no-csv specified but no --output-xlsx or --output-adi given; no output produced.")
+
+    if args.output_adi:
+        recs_only = [rec for rec, _, _ in filtered]
+        qrz.write_adif_file(recs_only, Path(args.output_adi))
+        log.info("ADI  : %d records -> %s", len(recs_only), args.output_adi)
 
     log.info("=== Done. ===")
-    if not args.output_xlsx:
+    if not args.output_xlsx and not args.output_adi:
         log.info(
             "Tip: add --output-xlsx <file> for a full editable workbook, "
-            "then --from-xlsx to convert back to ADIF after editing."
+            "--output-adi <file> for a raw ADIF output, "
+            "or --from-xlsx to convert back to ADIF after editing."
         )
 
 
