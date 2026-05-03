@@ -14,3 +14,7 @@ pyyaml>=6.0
 
 # Shapefile reading for adif_setup.py (Census TIGER / Natural Earth CDN)
 pyshp>=2.3
+
+# One-time setup only — not required at runtime
+# shapely>=2.0    # needed to run build_land_grids.py (generates land_grids.txt)
+#                 # pip install shapely  then  python build_land_grids.py
