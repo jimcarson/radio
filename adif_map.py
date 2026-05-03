@@ -34,7 +34,7 @@ Options:
     --output FILE           Output HTML filename (default: map_output.html next to input file)
 """
 
-__version__ = "1.2.5"  # pass verbose to build_base_map for tile layer summary
+__version__ = "1.2.6"  # Add AA00 null grid; skipped contact count printed under --verbose only
 
 import argparse
 import sys
@@ -168,26 +168,31 @@ def is_confirmed(record: dict):
     return lotw == 'Y' or qsl == 'Y' or qsl2 == 'Y'
 
 
-# JJ00 bounding box: 0°–2° N latitude, 0°–2° W longitude
+# JJ00 bounding box: 0°–2° N latitude, 0°–2° W longitude (Atlantic, prime meridian)
 _JJ00_LAT_MIN, _JJ00_LAT_MAX =  0.0,  2.0
 _JJ00_LON_MIN, _JJ00_LON_MAX = -2.0,  0.0
 
+# AA00 bounding box: 90°–89° S latitude, 180°–178° W longitude (near south pole / antimeridian)
+_AA00_LAT_MIN, _AA00_LAT_MAX = -90.0, -89.0
+_AA00_LON_MIN, _AA00_LON_MAX = -180.0, -178.0
+
 def is_null_grid(record: dict) -> bool:
     """
-    Return True if this record resolves to the JJ00 null grid.
+    Return True if this record resolves to a known null grid placeholder.
 
-    JJ00 is commonly used as a placeholder when the contacted station has no
-    meaningful location — it falls in the Atlantic Ocean near the prime meridian
-    and equator, producing a dense meaningless cluster on the map.
+    Two null grids are recognised:
+      JJ00 — 0°–2° N, 0°–2° W (mid-Atlantic near prime meridian/equator).
+              The most common placeholder for stations with no location data.
+      AA00 — 90°–89° S, 180°–178° W (near south pole / antimeridian).
+              Another common default/unset grid value.
 
-    Detection covers two cases:
-      1. GRIDSQUARE field starts with 'JJ00' (case-insensitive), regardless of
-         any further sub-square characters (e.g. JJ00aa also matches).
-      2. Explicit LAT/LON coordinates that fall within the JJ00 bounding box
-         (0°–2° N, 0°–2° W).
+    Detection covers two cases for each:
+      1. GRIDSQUARE field starts with 'JJ00' or 'AA00' (case-insensitive),
+         regardless of any further sub-square characters.
+      2. Explicit LAT/LON coordinates that fall within either bounding box.
     """
     grid = (record.get('GRIDSQUARE') or record.get('GRID') or '').strip().upper()
-    if grid.startswith('JJ00'):
+    if grid.startswith('JJ00') or grid.startswith('AA00'):
         return True
 
     lat_raw = record.get('LAT') or record.get('MY_LAT')
@@ -195,10 +200,13 @@ def is_null_grid(record: dict) -> bool:
     if lat_raw and lon_raw:
         lat = adif_latlon_to_decimal(lat_raw)
         lon = adif_latlon_to_decimal(lon_raw)
-        if (lat is not None and lon is not None
-                and _JJ00_LAT_MIN <= lat <= _JJ00_LAT_MAX
-                and _JJ00_LON_MIN <= lon <= _JJ00_LON_MAX):
-            return True
+        if lat is not None and lon is not None:
+            if (_JJ00_LAT_MIN <= lat <= _JJ00_LAT_MAX and
+                    _JJ00_LON_MIN <= lon <= _JJ00_LON_MAX):
+                return True
+            if (_AA00_LAT_MIN <= lat <= _AA00_LAT_MAX and
+                    _AA00_LON_MIN <= lon <= _AA00_LON_MAX):
+                return True
 
     return False
 
@@ -500,8 +508,9 @@ def build_map(my_coords, records, show_arcs: bool,
               f"{len({r.get('CALL','') for r in records})} unique contacts "
               f"({len(records)} QSOs total)")
 
-    if skipped:
-        print(f"  Note: {skipped} QSO(s) skipped — no usable coordinates found.")
+    if skipped and verbose:
+        print(f"  Note: {skipped} QSO(s) skipped — no usable coordinates "
+              f"(missing LAT/LON and GRIDSQUARE). Check with adif_extract.py --country.")
 
     # Return Leaflet JS variable names for the mode FeatureGroups
     layer_meta = {
@@ -1038,7 +1047,7 @@ def main():
     if not args.include_null_grid:
         null_count = sum(1 for r in records if is_null_grid(r))
         if null_count:
-            print(f"  {null_count} JJ00 (null-grid) contact(s) excluded — use --include-null-grid to show them.")
+            print(f"  {null_count} null-grid contact(s) excluded (JJ00/AA00) — use --include-null-grid to show them.")
     if args.overlays_only:
         print("  --overlays-only: contact dots suppressed; unworked overlay cells shown as ghost polygons.")
 
