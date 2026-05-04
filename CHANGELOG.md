@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-05-03
+
+### New files
+**`import_gadm.py`** (v1.0.0) - one-time import for downloading from UC Davis GADM, provides us with Japan, Mexico, South Korea among others.  Run this with the "--list" option.
+
+**`gsak/??`** - added numerous country region polygons from GSAK.  I may need to cull these as the GADM maps end up working better for many (not all, e.g., CZ) cases.
+
 ## 2026-05-02
 
 ### New files
