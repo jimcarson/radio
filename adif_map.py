@@ -34,7 +34,7 @@ Options:
     --output FILE           Output HTML filename (default: map_output.html next to input file)
 """
 
-__version__ = "1.2.6"  # Add AA00 null grid; skipped contact count printed under --verbose only
+__version__ = "1.2.7"  # Canadian/international county overlay: --db arg, coord-based fallback lookup via gsak_counties
 
 import argparse
 import sys
@@ -78,6 +78,11 @@ try:
 except ImportError:
     DXCC_US = '291'   # United States
     DXCC_CA = '1'     # Canada
+
+try:
+    from gsak_counties import lookup_county_adif_key as _gsak_lookup
+except ImportError:
+    _gsak_lookup = None
 
 
 
@@ -998,6 +1003,9 @@ def main():
                         help="Show in-browser collapsible band/mode filter panel (top-left of map)")
     parser.add_argument("--overlay",
                         help="Comma-separated overlays: grids, states, counties")
+    parser.add_argument("--db",
+                        help="Path to gsak_counties.db for Canadian/international county polygons "
+                             "(default: gsak_counties.db beside this script)")
     parser.add_argument("--theme",
                         help="Color theme YAML file (default: theme_default.yaml beside this script)")
     parser.add_argument("--verbose",   action="store_true",
@@ -1096,30 +1104,56 @@ def main():
     # Key functions for overlay builders
     def _us_key(r): return r.get('STATE','').upper().strip()[:2] if r.get('DXCC','') == DXCC_US else ''
     def _ca_key(r): return r.get('STATE','').upper().strip()[:2] if r.get('DXCC','') == DXCC_CA else ''
+    # Resolve db_path once — used by _cnty_key_fn fallback and build_counties_overlay
+    if args.db:
+        db_path = Path(args.db).expanduser().resolve()
+    else:
+        db_path = Path(__file__).parent / "gsak_counties.db"
+    if not db_path.exists():
+        db_path = None   # silently suppress — overlay will work US-only
+
+    # Coord-based county lookup cache: (round(lat,3), round(lon,3)) -> adif_key|''
+    # Avoids repeated DB point-in-polygon tests for contacts in the same area.
+    _coord_key_cache: dict = {}
+
     def _cnty_key_fn(r):
         import re as _re
         cnty = r.get('CNTY','').strip()
-        if not cnty or ',' not in cnty: return ''
-        state, name = cnty.split(',',1)
-        name = _re.sub(r'\s+(County|Parish|Borough|Census Area|Municipality)\s*$','',name.strip(),flags=_re.IGNORECASE).strip()
-        # Normalise to title case — LoTW exports county names in ALL CAPS
-        name = name.title()
-        # Normalise known LoTW/GSAK spelling differences.
-        # LoTW uses "De Kalb", "De Soto" (TX/FL/MS), "De Witt" as two words;
-        # GSAK stores them as one word. Apply per-state to avoid breaking
-        # Louisiana "De Soto" (Parish) which correctly stays two words.
-        _DEFIX = {
-            ('AL','De Kalb'):('AL','DeKalb'), ('GA','De Kalb'):('GA','DeKalb'),
-            ('IL','De Kalb'):('IL','DeKalb'), ('IN','De Kalb'):('IN','DeKalb'),
-            ('MO','De Kalb'):('MO','DeKalb'), ('TN','De Kalb'):('TN','DeKalb'),
-            ('FL','De Soto'):('FL','DeSoto'), ('MS','De Soto'):('MS','DeSoto'),
-            ('TX','De Witt'):('TX','DeWitt'),
-        }
-        st = state.upper()
-        fix = _DEFIX.get((st, name))
-        if fix:
-            st, name = fix
-        return f"{st},{name}"
+        if cnty and ',' in cnty:
+            state, name = cnty.split(',',1)
+            name = _re.sub(r'\s+(County|Parish|Borough|Census Area|Municipality)\s*$','',name.strip(),flags=_re.IGNORECASE).strip()
+            # Normalise to title case — LoTW exports county names in ALL CAPS
+            name = name.title()
+            # Normalise known LoTW/GSAK spelling differences.
+            # LoTW uses "De Kalb", "De Soto" (TX/FL/MS), "De Witt" as two words;
+            # GSAK stores them as one word. Apply per-state to avoid breaking
+            # Louisiana "De Soto" (Parish) which correctly stays two words.
+            _DEFIX = {
+                ('AL','De Kalb'):('AL','DeKalb'), ('GA','De Kalb'):('GA','DeKalb'),
+                ('IL','De Kalb'):('IL','DeKalb'), ('IN','De Kalb'):('IN','DeKalb'),
+                ('MO','De Kalb'):('MO','DeKalb'), ('TN','De Kalb'):('TN','DeKalb'),
+                ('FL','De Soto'):('FL','DeSoto'), ('MS','De Soto'):('MS','DeSoto'),
+                ('TX','De Witt'):('TX','DeWitt'),
+            }
+            st = state.upper()
+            fix = _DEFIX.get((st, name))
+            if fix:
+                st, name = fix
+            return f"{st},{name}"
+
+        # No CNTY field — fall back to coordinate-based DB lookup.
+        # Used for Canadian and other international contacts where LoTW
+        # does not populate CNTY.
+        if not db_path or not _gsak_lookup:
+            return ''
+        coords = resolve_coords(r)
+        if not coords:
+            return ''
+        cache_key = (round(coords[0], 3), round(coords[1], 3))
+        if cache_key not in _coord_key_cache:
+            _coord_key_cache[cache_key] = _gsak_lookup(
+                coords[0], coords[1], db_path=db_path) or ''
+        return _coord_key_cache[cache_key]
     def _grid_key(r):
         g = r.get('GRIDSQUARE','')[:4].upper()
         return g if len(g)==4 else ''
@@ -1144,7 +1178,8 @@ def main():
                                         key_fn=_cnty_key_fn,
                                         dynamic=args.show_filters,
                                         group_fn=_grp_fn, band_fn=_band_fn,
-                                        overlays_only=args.overlays_only)
+                                        overlays_only=args.overlays_only,
+                                        db_path=db_path)
         if result:
             overlay_meta['counties'] = result
     if "grids" in overlays:
