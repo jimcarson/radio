@@ -48,7 +48,7 @@ CLI lookup (for testing):
 Dependencies: stdlib only (sqlite3, json, pathlib, argparse)
 """
 
-__version__ = "1.6.0"  # country_polygons table, build-countries/list-countries subcommands, lookup_country()
+__version__ = "1.6.1"  # add 'list' (show region names for a state_code) and 'delete' (remove a map set) subcommands
 
 import argparse
 import json
@@ -809,6 +809,83 @@ def _cmd_list_countries(args):
     conn.close()
 
 
+
+def _cmd_list(args):
+    """List all region names stored for a given state_code."""
+    db_path = Path(args.db)
+    if not db_path.exists():
+        print(f"DB not found: {db_path}")
+        return
+    code = args.state_code.upper()
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+
+    summary = conn.execute(
+        "SELECT state_name, COUNT(*) as parts FROM counties "
+        "WHERE state_code = ? GROUP BY state_name",
+        (code,),
+    ).fetchone()
+    if summary is None:
+        print(f"No regions found for state_code '{code}' in {db_path}.")
+        conn.close()
+        return
+
+    rows = conn.execute(
+        "SELECT county_name, adif_key, COUNT(*) as parts "
+        "FROM counties WHERE state_code = ? "
+        "GROUP BY county_name ORDER BY county_name",
+        (code,),
+    ).fetchall()
+    conn.close()
+
+    total_parts = summary["parts"]
+    state_name  = summary["state_name"]
+    print(f"{code}  ({state_name})  -  {len(rows)} region(s), "
+          f"{total_parts} polygon part(s) total")
+    print(f"  {'Region':<40}  {'adif_key':<46}  {'Parts':>5}")
+    print("  " + "-" * 96)
+    for r in rows:
+        part_label = f"{r['parts']:>5}" if r["parts"] > 1 else "     "
+        print(f"  {r['county_name']:<40}  {r['adif_key']:<46}  {part_label}")
+
+
+def _cmd_delete(args):
+    """Delete all county rows for a given state_code from the DB."""
+    db_path = Path(args.db)
+    if not db_path.exists():
+        print(f"DB not found: {db_path}")
+        return
+    code = args.state_code.upper()
+    conn = sqlite3.connect(str(db_path))
+
+    row = conn.execute(
+        "SELECT state_name, COUNT(*) as n FROM counties "
+        "WHERE state_code = ?",
+        (code,),
+    ).fetchone()
+    if row is None or row[1] == 0:
+        print(f"No rows found for state_code '{code}' -- nothing deleted.")
+        conn.close()
+        return
+
+    state_name = row[0] or "?"
+    count      = row[1]
+
+    if not args.yes:
+        answer = input(
+            f"  Delete {count} row(s) for {code} ({state_name}) from {db_path}? [y/N] "
+        ).strip().lower()
+        if answer not in ("y", "yes"):
+            print("  Aborted.")
+            conn.close()
+            return
+
+    conn.execute("DELETE FROM counties WHERE state_code = ?", (code,))
+    conn.commit()
+    conn.close()
+    print(f"  Deleted {count} row(s) for {code} ({state_name}).")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="GSAK county polygon database builder and lookup tool.\n"
@@ -859,6 +936,25 @@ def main():
     p_lc.add_argument('--country', default=None,
                       help='Show parts for a specific country name')
     p_lc.set_defaults(func=_cmd_list_countries)
+
+    # list
+    p_list = sub.add_parser('list',
+                            help='List all region names stored for a state_code')
+    p_list.add_argument('--db', default='gsak_counties.db')
+    p_list.add_argument('--state-code', required=True,
+                        help='State/country code to list (e.g. NO, OH, WA, CZ)')
+    p_list.set_defaults(func=_cmd_list)
+
+    # delete
+    p_del = sub.add_parser('delete',
+                           help='Delete all county rows for a state_code')
+    p_del.add_argument('--db', default='gsak_counties.db')
+    p_del.add_argument('--state-code', required=True,
+                       help='State/country code to delete (e.g. NO, OH)')
+    p_del.add_argument('--yes', '-y', action='store_true',
+                       help='Skip confirmation prompt')
+    p_del.set_defaults(func=_cmd_delete)
+
 
     args = parser.parse_args()
     args.func(args)

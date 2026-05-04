@@ -47,9 +47,11 @@ Obligatory disclaimer:
 
 | File | Purpose |
 |---|---|
-| `gsak_counties.py` | Builds a SQLite database of county/regional polygons from GSAK boundary files; provides point-in-polygon lookup for geocache coordinate → county assignment |
+| `gsak_counties.py` | Builds and manages a SQLite database of county/regional polygons. GSAK files for US and Canada; GADM imports for international countries. Subcommands: `build`, `lookup`, `stats`, `list`, `delete`, `build-countries`, `list-countries` |
+| `import_gadm.py` | Downloads GADM 4.1 admin-level boundary data for international countries and imports it into `gsak_counties.db`. Accepts ISO 2-letter codes or ham radio prefix aliases. Run `--list` to see all supported countries. |
+| `rebuild_db.bat` | Windows batch script — deletes and fully rebuilds `gsak_counties.db` from scratch: US + Canada from GSAK, all international countries from GADM. Edit `GSAK_DIR` before running. |
 | `gsak_build_geojson.py` | Generates `us_counties.geojson` from `gsak_counties.db` — replaces the Census-derived file with higher-fidelity GSAK boundaries |
-| `gsak/*` | Polygons from Geocaching Swiss Army Knife (GSAK). |
+| `gsak/*` | Polygon files from Geocaching Swiss Army Knife (GSAK) — US counties and Canadian regional districts. |
 
 ### Configuration and data files
 
@@ -92,17 +94,29 @@ After cloning, you can optionally create your own boundary and county database f
 # 1. Download state/province boundary file
 python adif_setup.py
 
-# 2. Build the county polygon database from GSAK boundary files
-#    (requires the gsak/ directory with US/ and CA/ polygon subdirectories)
+# 2. Build the county polygon database
+#    US and Canada come from GSAK polygon files (requires the gsak/ directory).
+#    International countries are downloaded from GADM at runtime.
+
+#    Option A: use the provided batch script (Windows) — edit GSAK_DIR first
+rebuild_db.bat
+
+#    Option B: run steps manually
 python gsak_counties.py build --gsak-dir gsak --country US --verbose
 python gsak_counties.py build --gsak-dir gsak --country CA --verbose
+#    Then import international countries from GADM (downloads ~10-50 MB each):
+python import_gadm.py --db gsak_counties.db NO FI IS DE FR GB JP AU
+#    Finland needs level 2 for proper 19-region coverage (level 1 = 5 macro-regions):
+python import_gadm.py --db gsak_counties.db FI --level 2
+#    Run  python import_gadm.py --list  to see all supported countries.
 
-# 3. Generate the county GeoJSON for map rendering
+# 3. Generate the county GeoJSON for US map rendering
 python gsak_build_geojson.py
 
 # 4. Verify lookups are working
 python gsak_counties.py stats
 python gsak_counties.py lookup 47.56 -122.03
+python gsak_counties.py list --state-code NO
 
 # 5. (Optional) Generate the land-grid whitelist for --overlays-only grid ghost cells
 #    Requires shapely (one-time only — not a runtime dependency)
@@ -170,4 +184,4 @@ For full option reference, workflows, CSV formats, and field documentation, see 
 - Export a fresh ADIF from QRZ before each run — `APP_QRZLOG_LOGID` values can change if records were previously updated.
 - The scripts pause 1 second between API calls to avoid rate limiting.
 - In some cases, bad data is reported by the other party (e.g. a grid square of "LNA"). You can mark these as bad data in your corrections file, or the API will fail silently. There is no remedy from this side.
-- County polygon data is sourced from GSAK (Clyde Findlay and GSAK community contributors). See `CREDITS.txt` and `gsak/README.txt` for full attribution.
+- County polygon data for US and Canada is sourced from GSAK (Clyde Findlay and GSAK community contributors). International region data is sourced from GADM 4.1 (UC Davis). See `CREDITS.txt` for full attribution.

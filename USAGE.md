@@ -656,13 +656,15 @@ Both paths produce keys in `STATE,Name` format (e.g. `BC,Greater Vancouver`, `QC
 |---|---|---|
 | US counties | `us_counties.geojson` | `gsak_build_geojson.py` |
 | Canadian regional districts | `gsak_counties.db` | `gsak_counties.py build --country CA` |
-| International regions (NO, IS, CZ, FO, FR, …) | `gsak_counties.db` | `gsak_counties.py build --country <code>` |
+| International regions (NO, FI, IS, DE, FR, JP, AU, …) | `gsak_counties.db` | `import_gadm.py --db gsak_counties.db <CODE>` |
 
 Build the DB once per country:
 ```bash
 python gsak_counties.py build --gsak-dir gsak --country US --verbose
 python gsak_counties.py build --gsak-dir gsak --country CA --verbose
-python gsak_counties.py build --gsak-dir gsak --country IS --verbose
+# International countries via GADM:
+python import_gadm.py --db gsak_counties.db NO IS DE FR GB JP AU
+python import_gadm.py --db gsak_counties.db FI --level 2   # Finland needs level 2
 ```
 
 ### Filter Panel (`--show-filters`)
@@ -679,23 +681,37 @@ Injects a collapsible **Filters** panel (top-left). Sections:
 
 ## `gsak_counties.py`
 
-Builds a SQLite database of county and regional boundary polygons from GSAK `.txt` polygon files, and provides fast point-in-polygon lookup for coordinate → county assignment.
+Builds and manages a SQLite database of county and regional boundary polygons, and provides fast point-in-polygon lookup for coordinate → county/region assignment.
 
-County polygon data is sourced from GSAK (Clyde Findlay and GSAK community contributors). See `CREDITS.txt` and `gsak/README.txt` for full attribution.
+Two data sources are used:
+- **US counties and Canadian regional districts** — GSAK `.txt` polygon files (must match LoTW `CNTY` field values exactly)
+- **International countries** — GADM 4.1, imported via `import_gadm.py`
+
+County polygon data credit: GSAK (Clyde Findlay and GSAK community contributors); GADM 4.1 (UC Davis). See `CREDITS.txt` for full attribution.
 
 ### Quick Start
 
 ```bash
-# Build the database (run once, or after adding new polygon files)
+# Build US and Canada from GSAK files
 python gsak_counties.py build --gsak-dir gsak --country US --verbose
 python gsak_counties.py build --gsak-dir gsak --country CA --verbose
+
+# Import international countries from GADM (see import_gadm.py)
+python import_gadm.py --db gsak_counties.db NO FI IS DE FR GB JP AU
 
 # Verify coverage
 python gsak_counties.py stats
 
+# Inspect what's loaded for a specific country
+python gsak_counties.py list --state-code NO
+
 # Look up a county by coordinates
 python gsak_counties.py lookup 47.56 -122.03
 python gsak_counties.py lookup 51.05 -114.07
+
+# Remove a country set and reimport
+python gsak_counties.py delete --state-code NO --yes
+python import_gadm.py --db gsak_counties.db NO
 ```
 
 ### All Options
@@ -712,6 +728,18 @@ lookup <LAT> <LON>
 
 stats
   --db <FILE>         DB path (default: gsak_counties.db)
+                      Shows all state_codes, region counts, and display names.
+
+list
+  --db <FILE>         DB path (default: gsak_counties.db)
+  --state-code <CODE> Country/state code to inspect (e.g. NO, FI, WA, CZ)
+                      Shows every region name and adif_key stored for that code,
+                      plus polygon part counts for MultiPolygon regions.
+
+delete
+  --db <FILE>         DB path (default: gsak_counties.db)
+  --state-code <CODE> Country/state code to remove (e.g. NO, FI)
+  --yes / -y          Skip confirmation prompt (for scripting)
 ```
 
 ### Directory Structure
@@ -746,6 +774,89 @@ key = lookup_county_adif_key(47.56, -122.03)
 # With state hint for speed (bbox filter narrows candidates)
 state, county = lookup_county(47.56, -122.03, state_hint='WA')
 ```
+
+---
+
+## `import_gadm.py`
+
+Downloads GADM 4.1 administrative boundary data for international countries and imports the polygons into `gsak_counties.db`. This is the recommended way to add any country other than the US and Canada.
+
+GADM data is freely available for non-commercial use: https://gadm.org/license.html
+
+### Quick Start
+
+```bash
+# List all supported countries (shows DB code, ISO3, display name, and aliases)
+python import_gadm.py --list
+
+# Import one or more countries (ISO 2-letter code or ham prefix alias)
+python import_gadm.py --db gsak_counties.db NO FI IS DE FR GB JP AU
+
+# Finland needs level 2 — level 1 is only 5 macro-regions
+python import_gadm.py --db gsak_counties.db FI --level 2
+
+# Preview without writing to DB
+python import_gadm.py --db gsak_counties.db NO --dry-run
+
+# Replace a country (delete first, then reimport)
+python gsak_counties.py delete --db gsak_counties.db --state-code NO --yes
+python import_gadm.py --db gsak_counties.db NO
+```
+
+### All Options
+
+```
+<CODE> [CODE ...]    One or more country codes to import.
+                     Accepts ISO 2-letter codes (NO, FI, JP) or ham prefix
+                     aliases (LA→NO, OH→FI, JA→JP). Run --list to see all.
+--db <FILE>          Path to gsak_counties.db (default: gsak_counties.db)
+--level {1,2}        GADM admin level (default: 1).
+                     Level 1 = top-level regions (states, fylker, Länder).
+                     Level 2 = finer subdivisions (needed for Finland).
+--dry-run            Download and parse but do not write to DB
+--list               Print supported country codes and exit
+--state-code <CODE>  Override the state_code stored in DB (rarely needed)
+--verbose            Print each region and polygon part as processed
+```
+
+### Country Codes and Aliases
+
+All countries are stored in the DB under their ISO 2-letter code. Ham radio prefix aliases are accepted on the command line as a convenience. Three countries use their ham prefix as the DB state_code to avoid collisions with US state abbreviations:
+
+| Country | Type ISO | DB code | Ham aliases |
+|---|---|---|---|
+| Norway | NO | NO | LA |
+| Finland | FI | FI | OH |
+| Iceland | IS | IS | TF |
+| Czechia | CZ | CZ | OK |
+| Germany | DE | DE | DL |
+| Japan | JP | JP | JA |
+| South Korea | KR | KR | HL, KH |
+| Indonesia | ID | **YB** | ID, YB — `ID` collides with Idaho |
+| India | IN | **VU** | IN, VU — `IN` collides with Indiana |
+
+Run `python import_gadm.py --list` for the full table.
+
+### GADM Admin Levels
+
+Level 1 is the right choice for most countries. Exceptions:
+
+| Country | Level 1 | Level 2 (use this) |
+|---|---|---|
+| Finland | 5 macro-regions | 19 maakunta ← use `--level 2` |
+| United Kingdom | 4 countries (England/Scotland/Wales/NI) | 48 ceremonial counties |
+| Belgium | 3 regions | 11 provinces |
+
+For all other countries in the target set, level 1 gives the expected state/province/region equivalent (Germany's 16 Bundesländer, Japan's 47 prefectures, Australia's 8 states/territories, etc.).
+
+### Adding a New Country
+
+1. Check if the ISO 2-letter code collides with a US state or Canadian province abbreviation.
+2. If it does, use the ham prefix as the DB state_code (add an entry to `COUNTRY_TABLE` in `import_gadm.py` and add the code to `_INTL_ISO_CODES` in `map_core.py`).
+3. If it doesn't, just add it to `COUNTRY_TABLE` and `_INTL_ISO_CODES` with its ISO code.
+4. Run `python import_gadm.py --db gsak_counties.db <CODE>`.
+
+
 
 ---
 

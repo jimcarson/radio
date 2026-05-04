@@ -1,5 +1,60 @@
 # Changelog
 
+## 2026-05-04
+
+### Architecture change: GADM replaces GSAK for international regions
+
+The county polygon database now uses a two-source architecture:
+
+- **US + Canada** — GSAK polygon files (unchanged). These must match LoTW `CNTY` field values exactly, so GSAK remains the source of truth.
+- **All other countries** — GADM 4.1 (UC Davis), imported via `import_gadm.py`. GADM provides clean UTF-8 GeoJSON with consistent structure across all countries, and is actively maintained.
+
+All international countries are now stored under **ISO 2-letter state_codes** (NO, FI, JP, DE, FR, …) rather than ham radio prefixes (LA, OH, JA, DL, F, …). Ham prefixes are accepted as command-line aliases but the DB always stores the ISO code. Three countries have ISO codes that collide with US state abbreviations and use their ham prefix as the DB state_code instead:
+
+| Country | ISO | Ham prefix (DB code) | Collision avoided |
+|---|---|---|---|
+| Finland | FI | — | no collision; `FI` used directly |
+| Norway | NO | — | no collision; `NO` used directly |
+| Indonesia | ID | YB | Idaho (`ID`) |
+| India | IN | VU | Indiana (`IN`) |
+
+### `import_gadm.py` (v1.1.3)
+
+Complete rewrite of the country table and CLI:
+
+- **ISO-primary `COUNTRY_TABLE`** — each entry is now `(GADM ISO3, DB state_code, display name)`. Primary keys are ISO 2-letter codes; ham prefix aliases resolve to the same ISO3/state_code. `--list` output now shows DB code, ISO3, country name, and all accepted aliases in a single table.
+- **`--level` argument** (1 or 2, default 1) — selects GADM admin level. Level 1 is the top administrative division (states, fylker, Bundesländer). Level 2 gives finer subdivisions — needed for Finland, where level 1 is only 5 macro-regions but level 2 gives the proper 19 maakunta.
+- **`--state-code` override** — forces a specific state_code into the DB, rarely needed.
+- **GeometryCollection support** in `_flatten_geometry()` — handles features that use this type instead of Polygon/MultiPolygon. Previously these were silently skipped.
+- **Geometry skip warnings** always printed (not just with `--verbose`) — missing regions are never silent.
+- **Encoding fix** — `_decode_json_bytes()` tries UTF-8 then falls back to Latin-1, covering older GADM vintages.
+- **New countries added:** Poland (`PL`/`SP`), Indonesia (`YB`/`ID`), India (`VU`/`IN`), Belgium (`BE`), and a full European + Asia-Pacific + Americas set.
+- **`SP` alias corrected** — `SP` is the Poland ham prefix, not Spain. Spain's ham prefix is `EA`.
+
+### `gsak_counties.py` (v1.6.1)
+
+Two new CLI subcommands for DB inspection and maintenance:
+
+**`list`** — shows all region names and adif_keys stored for a given state_code, with polygon part counts for MultiPolygon regions:
+```
+python gsak_counties.py list --db gsak_counties.db --state-code NO
+python gsak_counties.py list --db gsak_counties.db --state-code FI
+```
+
+**`delete`** — removes all county rows for a given state_code (prompts for confirmation unless `--yes`/`-y` is passed):
+```
+python gsak_counties.py delete --db gsak_counties.db --state-code NO
+python gsak_counties.py delete --db gsak_counties.db --state-code NO --yes
+```
+
+### `map_core.py` (v1.4.7)
+
+**`_INTL_ISO_CODES` routing fix** — `build_counties_overlay()` previously routed any key whose state_code was in the US postal abbreviation set to the GeoJSON path. This caused Finland (`FI` fine, but old `OH` imports) and any future country whose ISO code or DB code coincides with a US state to silently fail. A new `_INTL_ISO_CODES` frozenset lists all ISO/ham codes used by `import_gadm.py`; keys in this set are always routed to the DB regardless of whether the code also appears in `_US_CODES`. Currently includes: `AR AT AU BE BR BY CH CL CN CZ DE DK ES FI FR GB HK IS IT JP KR MX NL NO NZ PE PL RU SE UA VE VU YB`.
+
+### New file: `rebuild_db.bat`
+
+One-shot Windows batch script that deletes the existing `gsak_counties.db` and rebuilds it cleanly from scratch. Runs GSAK builds for US and Canada, then GADM imports for the full international set (Norway, Finland, Iceland, Sweden, Denmark, Germany, France, UK, Netherlands, Belgium, Switzerland, Austria, Italy, Spain, Czechia, Poland, Ukraine, Japan, South Korea, Australia, New Zealand, Argentina, India, Indonesia, Russia). Edit `GSAK_DIR` at the top to match your installation path before running.
+
 ## 2026-05-03
 
 ### New files

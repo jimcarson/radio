@@ -18,7 +18,7 @@ Dependencies:
 
 from pathlib import Path
 
-__version__ = "1.4.5"  # map.cfg optional tile keys (Thunderforest, Stadia); OSM added; NatGeo default; verbose tile summary
+__version__ = "1.4.7"  # _INTL_ISO_CODES: add PL, VU (India), YB (Indonesia)
 
 try:
     import yaml
@@ -1015,12 +1015,26 @@ def build_counties_overlay(m: folium.Map, records: list,
             'DC','AS','GU','MP','PR','VI',
         })
 
+    # ISO 2-letter country codes used by import_gadm.py as DB state_codes.
+    # Some of these collide with US postal abbreviations (FI=Finland vs
+    # no collision but OH=Ohio collides with Finland's old ham prefix, and
+    # LA=Louisiana collides with Norway's ham prefix LA).  Any code that
+    # appears here is routed to the DB path regardless of _US_CODES.
+    _INTL_ISO_CODES = frozenset({
+        'AR','AT','AU','BE','BR','BY','CH','CL','CN','CZ',
+        'DE','DK','ES','FI','FR','GB','HK','IS','IT','JP',
+        'KR','MX','NL','NO','NZ','PE','PL','RU','SE','UA','VE',
+        'VU','YB',  # India (VU=ham prefix, avoids IN/Indiana), Indonesia (YB, avoids ID/Idaho)
+    })
+
     def _is_us_ca(adif_key: str) -> bool:
         """Return True only for US state/territory keys (GeoJSON path).
         Canadian province codes are excluded — their polygons live in the DB.
+        ISO 2-letter country codes in _INTL_ISO_CODES are always routed to
+        the DB even when they coincide with a US postal abbreviation.
         """
         code = adif_key.split(',', 1)[0] if ',' in adif_key else ''
-        return code in _US_CODES
+        return code in _US_CODES and code not in _INTL_ISO_CODES
 
     # -----------------------------------------------------------------------
     # US / CA path — load GeoJSON
