@@ -1,0 +1,18 @@
+# GsakName=Middle
+# This County polygon is based on data © OpenStreetMap contributors
+# The OpenStreetMap data is made available under the Open Database License, see http://www.openstreetmap.org/copyright
+# This polygon file is made available under the same Open Database License: http://opendatacommons.org/licenses/odbl/1.0/.
+
+54.140360	-4.469568
+54.140338	-4.469477
+54.140338	-4.469391
+54.140367	-4.469327
+54.140423	-4.469316
+54.140470	-4.469364
+54.140499	-4.469461
+54.140527	-4.469557
+54.140521	-4.469681
+54.140474	-4.469697
+54.140423	-4.469686
+54.140382	-4.469665
+54.140360	-4.469568

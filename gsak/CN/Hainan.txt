@@ -1,0 +1,15 @@
+# China Provicens Boundary Data
+# Hainan
+# Latitude  Longitude (WGS84)
+# Negative values are South or West
+#
+# http://bbs.godeyes.cn/showtopic-17652.aspx
+# Converted by hulmgulm and Fengerzh
+#
+20.256013,111.121216
+20.121966,109.324951
+19.310107,108.347168
+18.515033,108.495483
+17.942155,109.687500
+19.269665,111.417847
+20.256013,111.121216

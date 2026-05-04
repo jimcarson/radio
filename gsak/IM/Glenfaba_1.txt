@@ -1,0 +1,23 @@
+# GsakName=Glenfaba
+# This County polygon is based on data © OpenStreetMap contributors
+# The OpenStreetMap data is made available under the Open Database License, see http://www.openstreetmap.org/copyright
+# This polygon file is made available under the same Open Database License: http://opendatacommons.org/licenses/odbl/1.0/.
+
+54.162836	-4.744594
+54.162635	-4.745023
+54.162441	-4.745512
+54.162007	-4.745709
+54.161554	-4.746737
+54.161002	-4.746952
+54.161228	-4.746093
+54.161730	-4.744894
+54.162233	-4.744379
+54.162258	-4.744036
+54.162183	-4.743349
+54.162484	-4.742748
+54.162484	-4.742190
+54.162886	-4.741933
+54.163188	-4.742233
+54.163137	-4.743092
+54.163087	-4.743907
+54.162836	-4.744594

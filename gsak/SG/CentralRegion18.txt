@@ -1,0 +1,7 @@
+# GsakName=Central Region
+# This polygon is based on the official boundaries published by the Singapore Government https://data.gov.sg/dataset/master-plan-2014-region-boundary-no-sea
+1.221742493	103.8609018
+1.221714168	103.860871
+1.221310248	103.8611981
+1.221335968	103.8612315
+1.221742493	103.8609018

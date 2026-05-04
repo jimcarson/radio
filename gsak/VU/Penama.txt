@@ -1,0 +1,12 @@
+# GsakName=Penama
+# This County polygon is based on data © OpenStreetMap contributors
+# The OpenStreetMap data is made available under the Open Database License, see http://www.openstreetmap.org/copyright
+# This polygon file is made available under the same Open Database License: http://opendatacommons.org/licenses/odbl/1.0/.
+
+-14.60582	167.45033
+-14.59589	168.29993
+-15.87688	168.48574
+-16.07752	168.55364
+-16.11834	168.41097
+-15.95504	167.83260
+-15.73294	167.46882

@@ -1,0 +1,13 @@
+# GsakName=Rushen
+# This County polygon is based on data © OpenStreetMap contributors
+# The OpenStreetMap data is made available under the Open Database License, see http://www.openstreetmap.org/copyright
+# This polygon file is made available under the same Open Database License: http://opendatacommons.org/licenses/odbl/1.0/.
+
+54.060081	-4.760020
+54.060056	-4.760245
+54.059961	-4.760352
+54.059841	-4.760299
+54.059816	-4.760041
+54.059892	-4.759859
+54.059986	-4.759870
+54.060081	-4.760020

@@ -1,0 +1,14 @@
+# China Provicens Boundary Data
+# Taiwan
+# Latitude  Longitude (WGS84)
+# Negative values are South or West
+#
+# http://bbs.godeyes.cn/showtopic-17652.aspx
+# Converted by hulmgulm and Fengerzh
+#
+25.890855,120.937500
+25.831539,122.871094
+21.526671,121.948242
+21.832946,119.201660
+23.596208,119.157715
+25.890855,120.937500

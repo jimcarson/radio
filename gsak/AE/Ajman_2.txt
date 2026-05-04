@@ -1,0 +1,24 @@
+# GsakName=Ajman
+# This County polygon is based on data © OpenStreetMap contributors
+# The OpenStreetMap data is made available under the Open Database License, see http://www.openstreetmap.org/copyright
+# This polygon file is made available under the same Open Database License: http://opendatacommons.org/licenses/odbl/1.0/.
+
+25.28194	55.97722
+25.29166	55.98861
+25.29333	55.99249
+25.29305	55.99777
+25.30305	56.00777
+25.30805	56.00833
+25.31166	56.00666
+25.31944	56.00527
+25.32222	56.00305
+25.32555	55.99777
+25.32666	55.99305
+25.33167	55.98306
+25.32417	55.97083
+25.31916	55.96583
+25.30889	55.96111
+25.30416	55.96111
+25.29333	55.96555
+25.28806	55.96916
+25.28194	55.97722

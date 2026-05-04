@@ -1,0 +1,21 @@
+# GsakName=Shefa
+# This County polygon is based on data © OpenStreetMap contributors
+# The OpenStreetMap data is made available under the Open Database License, see http://www.openstreetmap.org/copyright
+# This polygon file is made available under the same Open Database License: http://opendatacommons.org/licenses/odbl/1.0/.
+
+-16.96139	167.44918
+-16.71382	167.91089
+-16.50159	168.03349
+-16.54754	168.25102
+-16.60119	168.54428
+-16.56801	168.71992
+-16.94218	168.84705
+-16.96076	168.85237
+-16.99681	168.85739
+-17.02156	168.85708
+-17.63523	168.80969
+-18.02148	169.08156
+-18.42781	168.41404
+-17.84624	167.99773
+-17.84134	167.99435
+-17.81499	167.97698

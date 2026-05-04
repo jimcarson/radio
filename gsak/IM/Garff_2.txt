@@ -1,0 +1,19 @@
+# GsakName=Garff
+# This County polygon is based on data © OpenStreetMap contributors
+# The OpenStreetMap data is made available under the Open Database License, see http://www.openstreetmap.org/copyright
+# This polygon file is made available under the same Open Database License: http://opendatacommons.org/licenses/odbl/1.0/.
+
+54.314013	-4.357600
+54.313965	-4.357623
+54.313917	-4.357576
+54.313855	-4.357459
+54.313855	-4.357330
+54.313814	-4.357259
+54.313794	-4.357165
+54.313869	-4.357119
+54.313965	-4.357119
+54.313992	-4.357048
+54.314074	-4.357083
+54.314115	-4.357248
+54.314061	-4.357412
+54.314013	-4.357600

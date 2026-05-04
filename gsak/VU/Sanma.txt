@@ -1,0 +1,19 @@
+# GsakName=Sanma
+# This County polygon is based on data © OpenStreetMap contributors
+# The OpenStreetMap data is made available under the Open Database License, see http://www.openstreetmap.org/copyright
+# This polygon file is made available under the same Open Database License: http://opendatacommons.org/licenses/odbl/1.0/.
+
+-14.42493	166.34134
+-14.77474	166.34234
+-14.82214	166.33646
+-14.86084	166.33553
+-14.88355	166.33848
+-15.43272	166.44319
+-15.47352	166.45574
+-15.48408	166.46056
+-15.73787	166.58560
+-15.76800	166.60390
+-15.93943	166.72952
+-15.80261	167.25262
+-15.73294	167.46882
+-14.60582	167.45033

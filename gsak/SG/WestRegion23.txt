@@ -1,0 +1,7 @@
+# GsakName=West Region
+# This polygon is based on the official boundaries published by the Singapore Government https://data.gov.sg/dataset/master-plan-2014-region-boundary-no-sea
+1.159976941	103.7413039
+1.159788858	103.7412609
+1.159780169	103.7412999
+1.159968251	103.7413428
+1.159976941	103.7413039

@@ -1,0 +1,25 @@
+# GsakName=Sharjah
+# This County polygon is based on data © OpenStreetMap contributors
+# The OpenStreetMap data is made available under the Open Database License, see http://www.openstreetmap.org/copyright
+# This polygon file is made available under the same Open Database License: http://opendatacommons.org/licenses/odbl/1.0/.
+
+25.27307	56.25687
+25.26935	56.25902
+25.26786	56.26181
+25.26242	56.26092
+25.25921	56.26118
+25.25658	56.25953
+25.25110	56.26206
+25.25293	56.26846
+25.25224	56.27634
+25.26614	56.27813
+25.26811	56.28502
+25.26940	56.27992
+25.27080	56.27759
+25.27323	56.27544
+25.27483	56.27463
+25.28056	56.27363
+25.28262	56.27050
+25.27915	56.26589
+25.27879	56.26253
+25.27307	56.25687
